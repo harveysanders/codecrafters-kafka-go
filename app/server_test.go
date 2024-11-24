@@ -41,6 +41,7 @@ func TestServer(t *testing.T) {
 
 		// ApiVersions Response
 		// message_size:        4 bytes
+		// ____________________________
 		// correlation_id:      4 bytes
 		// error_code: 					2 bytes
 		// []api_keys ___				1 byte (len)
@@ -52,17 +53,40 @@ func TestServer(t *testing.T) {
 		// throttle_time_ms			4 bytes
 		// tagged_fields				1 byte
 		//
-		// total 								23 bytes
-		expectedReqLen := int32(23)
+		// total 								19 bytes (not including msg size bytes)
+		expectedReqLen := int32(19)
 		var msgSize int32
 		err = binary.Read(client, binary.BigEndian, &msgSize)
 		require.NoError(t, err)
 
 		require.Equal(t, expectedReqLen, msgSize)
 
-		respBuf := make([]byte, 0, msgSize-4)
+		respBuf := make([]byte, msgSize) // skip 4 bytes from msgLen
 		_, err = io.ReadFull(client, respBuf)
 		require.NoError(t, err)
+
+		// Check all the fields
+		//  - .ResponseHeader
+		//  	- .correlation_id (391911466)
+		require.Equal(t, []byte{0x17, 0x5c, 0x18, 0x2a}, respBuf[0:4])
+		//  - .ResponseBody
+		//  	- .error_code (0)
+		require.Equal(t, []byte{0x0, 0x0}, respBuf[4:6])
+		//  	- .num_api_keys (1)
+		require.Equal(t, []byte{0x2}, respBuf[6:7])
+		//  	- .ApiKeys[0]
+		//  		- .api_key (18)
+		require.Equal(t, []byte{0x0, 0x12}, respBuf[7:9])
+		//  		- .min_version (4)
+		require.Equal(t, []byte{0x0, 0x4}, respBuf[9:11])
+		//  		- .max_version (4)
+		require.Equal(t, []byte{0x0, 0x4}, respBuf[11:13])
+		//  		- .TAG_BUFFER
+		require.Equal(t, []byte{0x0}, respBuf[13:14])
+		//  	- .throttle_time_ms (0)
+		require.Equal(t, []byte{0x0, 0x0, 0x0, 0x0}, respBuf[14:18])
+		//  	- .TAG_BUFFER
+		require.Equal(t, []byte{0x0}, respBuf[18:19])
 	})
 
 }

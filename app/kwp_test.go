@@ -67,6 +67,7 @@ func TestAPIVersionsResponse(t *testing.T) {
 	// throttle_time_ms => INT32
 
 	// message_size:        4 bytes
+	// ____________________________
 	// correlation_id:      4 bytes
 	// error_code: 					2 bytes
 	// api_keys ___					1 byte for len (Compact Array)
@@ -77,8 +78,8 @@ func TestAPIVersionsResponse(t *testing.T) {
 	// api_keys ___
 	// throttle_time_ms			4 bytes
 	// tagged_fields				1 byte
-	// total 								22 bytes
-	wantLen := 23
+	// total 								19 bytes
+	wantLen := 19
 	require.Equal(t, int64(wantLen), n)
 
 	var gotMsgSize int32

@@ -49,7 +49,7 @@ func (r response) WriteTo(w io.Writer) (n int64, err error) {
 		return 0, fmt.Errorf("write body: %w", err)
 	}
 
-	r.msgSize = int32(buf.Len()) + 4 // include int32 for msgSize
+	r.msgSize = int32(buf.Len())
 	err = binary.Write(w, binary.BigEndian, r.msgSize)
 	if err != nil {
 		return 0, fmt.Errorf("write message size: %w", err)
