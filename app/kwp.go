@@ -23,19 +23,13 @@ type response struct {
 }
 
 // MarshalBinary serializes the response to Kafka wire protocol.
-// 4 bytes - message size
-// 4 bytes - header
 func (r response) MarshalBinary() ([]byte, error) {
-	data := make([]byte, 0, 8)
+	data := make([]byte, 0, r.msgSize)
 	w := bytes.NewBuffer(data)
 
-	err := binary.Write(w, binary.BigEndian, r.msgSize)
+	_, err := r.WriteTo(w)
 	if err != nil {
-		return w.Bytes(), fmt.Errorf("write message size: %w", err)
-	}
-	err = binary.Write(w, binary.BigEndian, r.header.correlationID)
-	if err != nil {
-		return w.Bytes(), fmt.Errorf("write header: %w", err)
+		return nil, err
 	}
 	return w.Bytes(), nil
 }
@@ -71,11 +65,11 @@ type request struct {
 
 // requestHeader v2
 type requestHeader struct {
-	requestAPIKey     int16    // The API key for the request.
-	requestAPIVersion int16    // The version of the API for the request.
-	correlationID     int32    // A unique ID for the request.
-	clientID          *string  // The client ID for the request.
-	tagBuffer         []string // Optional tagged fields.
+	requestAPIKey     int16        // The API key for the request.
+	requestAPIVersion int16        // The version of the API for the request.
+	correlationID     int32        // A unique ID for the request.
+	clientID          *string      // The client ID for the request.
+	tagBuffer         taggedFields // Optional tagged fields.
 }
 
 func (r *request) UnmarshalBinary(data []byte) error {
@@ -102,6 +96,41 @@ func (r *request) ReadFrom(rdr io.Reader) (n int64, err error) {
 		return 4 + 2 + 2, fmt.Errorf("read correlation ID: %w", err)
 	}
 	return 4 + 2 + 2 + 4, nil
+}
+
+type taggedField []byte
+
+func (tf taggedField) WriteTo(w io.Writer) (int64, error) {
+	// TODO:
+	return 0, nil
+}
+
+// taggedFields or tag section begins with a number of tagged fields,
+// serialized as a unsigned variable-length integer.
+// If this number is 0, there are no tagged fields present.
+// In that case, the tag section takes up only one byte.
+// If the number of tagged fields is greater than zero,
+// the tagged fields follow.
+// They are serialized in ascending order of their tag.
+// Each tagged field begins with a tag header.
+type taggedFields []taggedField
+
+func (tf taggedFields) WriteTo(w io.Writer) (int64, error) {
+	// https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields#KIP482:TheKafkaProtocolshouldSupportOptionalTaggedFields-Serialization
+	buf := make([]byte, 8)
+	n := binary.PutUvarint(buf, uint64(len(tf)))
+	if _, err := w.Write(buf[:n]); err != nil {
+		return 0, fmt.Errorf("write number of tagged fields: %w", err)
+	}
+	nWritten := int64(n)
+	for _, field := range tf {
+		n, err := field.WriteTo(w)
+		if err != nil {
+			return nWritten, err
+		}
+		nWritten += n
+	}
+	return nWritten, nil
 }
 
 const (
@@ -134,35 +163,58 @@ func (a apiKey) WriteTo(w io.Writer) (int64, error) {
 }
 
 type ApiVersionsResponse struct {
-	errorCode      int16    //The top-level error code.
-	apiKeys        []apiKey // 	The APIs supported by the broker.
-	throttleTimeMs int32    // The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota.
-	taggedFields   byte     // Unused
+	errorCode      int16                //The top-level error code.
+	apiKeys        compactArray[apiKey] // 	The APIs supported by the broker.
+	throttleTimeMs int32                // The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota.
+	taggedFields   taggedFields         // Unused
 }
 
 func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
 	if err := binary.Write(w, binary.BigEndian, a.errorCode); err != nil {
 		return 0, fmt.Errorf("write error code: %w", err)
 	}
-	apiKeySize := 3 * 2 // 3 int16 fields
-	data := make([]byte, 0, len(a.apiKeys)*apiKeySize)
-	buf := bytes.NewBuffer(data)
-	for _, apiKey := range a.apiKeys {
-		_, err := apiKey.WriteTo(buf)
-		if err != nil {
-			return 0, err
-		}
-	}
+	// apiKeySize := 3 * 2 // 3 int16 fields
+	// data := make([]byte, 0, len(a.apiKeys)*apiKeySize)
+	// buf := bytes.NewBuffer(data)
+	// for _, apiKey := range a.apiKeys {
+	// 	_, err := apiKey.WriteTo(buf)
+	// 	if err != nil {
+	// 		return 0, err
+	// 	}
+	// }
 
-	nW, err := w.Write(buf.Bytes())
+	// nW, err := w.Write(buf.Bytes())
+	nW, err := a.apiKeys.WriteTo(w)
 	if err != nil {
 		return 0, fmt.Errorf("write api_keys:= %w", err)
 	}
 	if err := binary.Write(w, binary.BigEndian, a.throttleTimeMs); err != nil {
 		return 0, fmt.Errorf("write throttle_time_ms: %w", err)
 	}
-	if err := binary.Write(w, binary.BigEndian, a.taggedFields); err != nil {
+
+	nTagged, err := a.taggedFields.WriteTo(w)
+	if err != nil {
 		return 4, fmt.Errorf("write tagged_fields: %w", err)
 	}
-	return int64(nW + 4 + 1), err
+	return nW + 4 + nTagged, err
+}
+
+type compactArray[T io.WriterTo] []T
+
+func (c compactArray[T]) WriteTo(w io.Writer) (int64, error) {
+	buf := make([]byte, 8)
+	n := binary.PutUvarint(buf, uint64(len(c)+1))
+	if _, err := w.Write(buf[:n]); err != nil {
+		return 0, fmt.Errorf("write number of tagged fields: %w", err)
+	}
+	nWritten := int64(n)
+
+	for _, item := range c {
+		n, err := item.WriteTo(w)
+		if err != nil {
+			return nWritten, err
+		}
+		nWritten += n
+	}
+	return nWritten, nil
 }

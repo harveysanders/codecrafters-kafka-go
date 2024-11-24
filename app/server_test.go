@@ -43,7 +43,7 @@ func TestServer(t *testing.T) {
 		// message_size:        4 bytes
 		// correlation_id:      4 bytes
 		// error_code: 					2 bytes
-		// []api_keys ___
+		// []api_keys ___				1 byte (len)
 		// 	api_key							2 bytes
 		// 	min_version					2 bytes
 		// 	max_version					2 bytes
@@ -52,8 +52,8 @@ func TestServer(t *testing.T) {
 		// throttle_time_ms			4 bytes
 		// tagged_fields				1 byte
 		//
-		// total 								22 bytes
-		expectedReqLen := int32(22)
+		// total 								23 bytes
+		expectedReqLen := int32(23)
 		var msgSize int32
 		err = binary.Read(client, binary.BigEndian, &msgSize)
 		require.NoError(t, err)
