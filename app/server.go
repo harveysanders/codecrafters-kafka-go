@@ -23,6 +23,9 @@ func handle(conn net.Conn) {
 	case APIKeyApiVersions:
 		resp.body = ApiVersionsResponse{
 			errorCode: APIVersionsErrUnsupportedVersion,
+			apiKeys: []apiKey{
+				{val: APIKeyApiVersions, minVersion: 4, maxVersion: 4},
+			},
 		}
 	default:
 

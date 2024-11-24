@@ -110,13 +110,44 @@ const (
 	APIVersionsErrUnsupportedVersion = int16(35)
 )
 
+type apiKey struct {
+	val        int16
+	minVersion int16
+	maxVersion int16
+}
+
+func (a apiKey) WriteTo(w io.Writer) (int64, error) {
+	if err := binary.Write(w, binary.BigEndian, a.val); err != nil {
+		return 0, fmt.Errorf("write api_key: %w", err)
+	}
+	if err := binary.Write(w, binary.BigEndian, a.minVersion); err != nil {
+		return 2, fmt.Errorf("write min_version: %w", err)
+	}
+	if err := binary.Write(w, binary.BigEndian, a.maxVersion); err != nil {
+		return 4, fmt.Errorf("write max_version: %w", err)
+	}
+	return 6, nil
+}
+
 type ApiVersionsResponse struct {
 	errorCode int16
+	apiKeys   []apiKey
 }
 
 func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
 	if err := binary.Write(w, binary.BigEndian, a.errorCode); err != nil {
 		return 0, fmt.Errorf("write error code: %w", err)
 	}
-	return 2, nil
+	apiKeySize := 3 * 2 // 3 int16 fields
+	data := make([]byte, 0, len(a.apiKeys)*apiKeySize)
+	buf := bytes.NewBuffer(data)
+	for _, apiKey := range a.apiKeys {
+		_, err := apiKey.WriteTo(buf)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	nW, err := w.Write(buf.Bytes())
+	return int64(nW), err
 }
