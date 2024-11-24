@@ -2,9 +2,36 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 )
+
+type server struct {
+}
+
+func (s *server) ListenAndServe() error {
+	l, err := net.Listen("tcp", "0.0.0.0:9092")
+	if err != nil {
+		return fmt.Errorf("failed to bind to port 9092: %w", err)
+
+	}
+	defer func() { _ = l.Close() }()
+
+	return s.Serve(l)
+}
+
+func (s *server) Serve(l net.Listener) error {
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			os.Exit(1)
+		}
+
+		go handle(conn)
+	}
+}
 
 func handle(conn net.Conn) {
 	req := &request{}
@@ -40,29 +67,9 @@ func handle(conn net.Conn) {
 }
 
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
+	srv := server{}
 
-	// Uncomment this block to pass the first stage
-	//
-	l, err := net.Listen("tcp", "0.0.0.0:9092")
-	if err != nil {
-		fmt.Println("Failed to bind to port 9092")
-		os.Exit(1)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatal(err)
 	}
-
-	defer func() {
-		_ = l.Close()
-	}()
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection: ", err.Error())
-			os.Exit(1)
-		}
-
-		go handle(conn)
-	}
-
 }
