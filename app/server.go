@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -20,18 +22,29 @@ type response struct {
 // 4 bytes - header
 func (r response) MarshalBinary() ([]byte, error) {
 	data := make([]byte, 0, 8)
-	data = append(data, byte(r.msgSize))
-	data = append(data, byte(r.header.correlationID))
-	return data, nil
+	w := bytes.NewBuffer(data)
+
+	err := binary.Write(w, binary.BigEndian, r.msgSize)
+	if err != nil {
+		return w.Bytes(), fmt.Errorf("write message size: %w", err)
+	}
+	err = binary.Write(w, binary.BigEndian, r.header.correlationID)
+	if err != nil {
+		return w.Bytes(), fmt.Errorf("write header: %w", err)
+	}
+	return w.Bytes(), nil
 }
 
 func (r response) WriteTo(w io.Writer) (n int64, err error) {
-	data, err := r.MarshalBinary()
+	err = binary.Write(w, binary.BigEndian, r.msgSize)
 	if err != nil {
-		return 0, fmt.Errorf("response marshall: %w", err)
+		return 0, fmt.Errorf("write message size: %w", err)
 	}
-	nWritten, err := w.Write(data)
-	return int64(nWritten), err
+	err = binary.Write(w, binary.BigEndian, r.header.correlationID)
+	if err != nil {
+		return 4, fmt.Errorf("write header: %w", err)
+	}
+	return 8, nil
 }
 
 func handle(conn net.Conn) {
@@ -39,13 +52,7 @@ func handle(conn net.Conn) {
 		header: responseHeader{correlationID: 7},
 	}
 
-	data, err := resp.MarshalBinary()
-	if err != nil {
-		fmt.Printf("response marshall: %v\n", err)
-		os.Exit(1)
-	}
-
-	n, err := conn.Write(data)
+	n, err := resp.WriteTo(conn)
 	if err != nil {
 		fmt.Printf("Error writing response %v\n", err)
 		os.Exit(1)
