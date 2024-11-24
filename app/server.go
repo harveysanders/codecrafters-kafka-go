@@ -1,61 +1,29 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 	"os"
 )
 
-type responseHeader struct {
-	correlationID int32
-}
-type response struct {
-	msgSize int32
-	header  responseHeader
-}
-
-// MarshalBinary serializes the response to Kafka wire protocol.
-// 4 bytes - message size
-// 4 bytes - header
-func (r response) MarshalBinary() ([]byte, error) {
-	data := make([]byte, 0, 8)
-	w := bytes.NewBuffer(data)
-
-	err := binary.Write(w, binary.BigEndian, r.msgSize)
-	if err != nil {
-		return w.Bytes(), fmt.Errorf("write message size: %w", err)
-	}
-	err = binary.Write(w, binary.BigEndian, r.header.correlationID)
-	if err != nil {
-		return w.Bytes(), fmt.Errorf("write header: %w", err)
-	}
-	return w.Bytes(), nil
-}
-
-func (r response) WriteTo(w io.Writer) (n int64, err error) {
-	err = binary.Write(w, binary.BigEndian, r.msgSize)
-	if err != nil {
-		return 0, fmt.Errorf("write message size: %w", err)
-	}
-	err = binary.Write(w, binary.BigEndian, r.header.correlationID)
-	if err != nil {
-		return 4, fmt.Errorf("write header: %w", err)
-	}
-	return 8, nil
-}
-
 func handle(conn net.Conn) {
+	req := &request{}
+
+	nRead, err := req.ReadFrom(conn)
+	if err != nil {
+		fmt.Printf("Error reading request: %v\n", err)
+		return
+	}
+	fmt.Printf("read %d bytes from request\n", nRead)
+
 	resp := response{
-		header: responseHeader{correlationID: 7},
+		header: responseHeader{correlationID: req.header.correlationID},
 	}
 
 	n, err := resp.WriteTo(conn)
 	if err != nil {
 		fmt.Printf("Error writing response %v\n", err)
-		os.Exit(1)
+		return
 	}
 
 	fmt.Printf("wrote response of len %d\n", n)
