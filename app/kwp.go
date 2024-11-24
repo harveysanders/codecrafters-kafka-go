@@ -130,8 +130,9 @@ func (a apiKey) WriteTo(w io.Writer) (int64, error) {
 }
 
 type ApiVersionsResponse struct {
-	errorCode int16
-	apiKeys   []apiKey
+	errorCode      int16    //The top-level error code.
+	apiKeys        []apiKey // 	The APIs supported by the broker.
+	throttleTimeMs int32    // The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota.
 }
 
 func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
@@ -149,5 +150,9 @@ func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
 	}
 
 	nW, err := w.Write(buf.Bytes())
-	return int64(nW), err
+	if err != nil {
+		return 0, fmt.Errorf("write api_keys:= %w", err)
+	}
+	err = binary.Write(w, binary.BigEndian, a.throttleTimeMs)
+	return int64(nW + 4), err
 }

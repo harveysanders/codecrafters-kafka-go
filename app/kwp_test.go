@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,4 +43,36 @@ func TestRequestUnmarshalBinary(t *testing.T) {
 		require.Equal(t, req.header.requestAPIVersion, tc.wantReq.header.requestAPIVersion)
 		require.Equal(t, req.header.correlationID, tc.wantReq.header.correlationID)
 	}
+}
+
+func TestAPIVersionsResponse(t *testing.T) {
+	resp := response{
+		header: responseHeader{correlationID: 12345},
+		body: ApiVersionsResponse{
+			apiKeys: []apiKey{
+				{val: APIKeyApiVersions, minVersion: 4, maxVersion: 4},
+			},
+		},
+	}
+	var gotBuf bytes.Buffer
+
+	_, err := resp.WriteTo(&gotBuf)
+	require.NoError(t, err)
+
+	// message_size:        4 bytes
+	// correlation_id:      4 bytes
+	// error_code: 					2 bytes
+	// api_keys ___
+	// api_key							2 bytes
+	// min_version					2 bytes
+	// max_version					2 bytes
+	// api_keys ___
+	// throttle_time_ms			4 bytes
+	// total 								20 bytes
+	// require.Equal(t, int64(20), n)
+
+	var gotMsgSize int32
+	err = binary.Read(&gotBuf, binary.BigEndian, &gotMsgSize)
+	require.NoError(t, err)
+	require.Equal(t, int32(20), gotMsgSize)
 }
