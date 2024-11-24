@@ -43,14 +43,14 @@ func (r response) MarshalBinary() ([]byte, error) {
 func (r response) WriteTo(w io.Writer) (n int64, err error) {
 	// Need internal buffer to know how long the message is before
 	// writing to w.
-	var buf *bytes.Buffer
+	var buf bytes.Buffer
 
-	err = binary.Write(buf, binary.BigEndian, r.header.correlationID)
+	err = binary.Write(&buf, binary.BigEndian, r.header.correlationID)
 	if err != nil {
 		return 0, fmt.Errorf("write header: %w", err)
 	}
 
-	_, err = r.body.WriteTo(buf)
+	_, err = r.body.WriteTo(&buf)
 	if err != nil {
 		return 0, fmt.Errorf("write body: %w", err)
 	}
