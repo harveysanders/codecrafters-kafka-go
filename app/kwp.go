@@ -7,12 +7,19 @@ import (
 	"io"
 )
 
+// API Keys (identifiers)
+const (
+	APIKeyProduce     = 0
+	APIKeyApiVersions = 18
+)
+
 type responseHeader struct {
 	correlationID int32
 }
 type response struct {
 	msgSize int32
 	header  responseHeader
+	body    io.WriterTo
 }
 
 // MarshalBinary serializes the response to Kafka wire protocol.
@@ -42,7 +49,12 @@ func (r response) WriteTo(w io.Writer) (n int64, err error) {
 	if err != nil {
 		return 4, fmt.Errorf("write header: %w", err)
 	}
-	return 8, nil
+
+	nBody, err := r.body.WriteTo(w)
+	if err != nil {
+		return 8, fmt.Errorf("write body: %w", err)
+	}
+	return 8 + nBody, nil
 }
 
 type request struct {
@@ -83,4 +95,21 @@ func (r *request) ReadFrom(rdr io.Reader) (n int64, err error) {
 		return 4 + 2 + 2, fmt.Errorf("read correlation ID: %w", err)
 	}
 	return 4 + 2 + 2 + 4, nil
+}
+
+const (
+	// Denotes the version of ApiVersions requested by the client is not supported by the broker.
+	// Assume that your broker only supports versions 0 to 4.
+	APIVersionsErrUnsupportedVersion = int16(35)
+)
+
+type ApiVersionsResponse struct {
+	errorCode int16
+}
+
+func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
+	if err := binary.Write(w, binary.BigEndian, a.errorCode); err != nil {
+		return 0, fmt.Errorf("write error code: %w", err)
+	}
+	return 2, nil
 }

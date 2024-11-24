@@ -19,6 +19,14 @@ func handle(conn net.Conn) {
 	resp := response{
 		header: responseHeader{correlationID: req.header.correlationID},
 	}
+	switch req.header.requestAPIKey {
+	case APIKeyApiVersions:
+		resp.body = ApiVersionsResponse{
+			errorCode: APIVersionsErrUnsupportedVersion,
+		}
+	default:
+
+	}
 
 	n, err := resp.WriteTo(conn)
 	if err != nil {
