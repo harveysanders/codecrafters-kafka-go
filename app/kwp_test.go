@@ -66,13 +66,16 @@ func TestAPIVersionsResponse(t *testing.T) {
 	// api_key							2 bytes
 	// min_version					2 bytes
 	// max_version					2 bytes
+	// tagged_fields				1 byte
 	// api_keys ___
 	// throttle_time_ms			4 bytes
-	// total 								20 bytes
-	require.Equal(t, int64(20), n)
+	// tagged_fields				1 byte
+	// total 								22 bytes
+	wantLen := 22
+	require.Equal(t, int64(wantLen), n)
 
 	var gotMsgSize int32
 	err = binary.Read(&gotBuf, binary.BigEndian, &gotMsgSize)
 	require.NoError(t, err)
-	require.Equal(t, int32(20), gotMsgSize)
+	require.Equal(t, int32(wantLen), gotMsgSize)
 }

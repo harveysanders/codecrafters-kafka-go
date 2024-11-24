@@ -111,9 +111,10 @@ const (
 )
 
 type apiKey struct {
-	val        int16
-	minVersion int16
-	maxVersion int16
+	val          int16
+	minVersion   int16
+	maxVersion   int16
+	taggedFields byte // Unused
 }
 
 func (a apiKey) WriteTo(w io.Writer) (int64, error) {
@@ -126,6 +127,9 @@ func (a apiKey) WriteTo(w io.Writer) (int64, error) {
 	if err := binary.Write(w, binary.BigEndian, a.maxVersion); err != nil {
 		return 4, fmt.Errorf("write max_version: %w", err)
 	}
+	if err := binary.Write(w, binary.BigEndian, a.taggedFields); err != nil {
+		return 4, fmt.Errorf("write tagged_fields: %w", err)
+	}
 	return 6, nil
 }
 
@@ -133,6 +137,7 @@ type ApiVersionsResponse struct {
 	errorCode      int16    //The top-level error code.
 	apiKeys        []apiKey // 	The APIs supported by the broker.
 	throttleTimeMs int32    // The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota.
+	taggedFields   byte     // Unused
 }
 
 func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
@@ -153,6 +158,11 @@ func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("write api_keys:= %w", err)
 	}
-	err = binary.Write(w, binary.BigEndian, a.throttleTimeMs)
-	return int64(nW + 4), err
+	if err := binary.Write(w, binary.BigEndian, a.throttleTimeMs); err != nil {
+		return 0, fmt.Errorf("write throttle_time_ms: %w", err)
+	}
+	if err := binary.Write(w, binary.BigEndian, a.taggedFields); err != nil {
+		return 4, fmt.Errorf("write tagged_fields: %w", err)
+	}
+	return int64(nW + 4 + 1), err
 }
