@@ -41,20 +41,27 @@ func (r response) MarshalBinary() ([]byte, error) {
 }
 
 func (r response) WriteTo(w io.Writer) (n int64, err error) {
+	// Need internal buffer to know how long the message is before
+	// writing to w.
+	var buf *bytes.Buffer
+
+	err = binary.Write(buf, binary.BigEndian, r.header.correlationID)
+	if err != nil {
+		return 0, fmt.Errorf("write header: %w", err)
+	}
+
+	_, err = r.body.WriteTo(buf)
+	if err != nil {
+		return 0, fmt.Errorf("write body: %w", err)
+	}
+
+	r.msgSize = int32(buf.Len()) + 4 // include int32 for msgSize
 	err = binary.Write(w, binary.BigEndian, r.msgSize)
 	if err != nil {
 		return 0, fmt.Errorf("write message size: %w", err)
 	}
-	err = binary.Write(w, binary.BigEndian, r.header.correlationID)
-	if err != nil {
-		return 4, fmt.Errorf("write header: %w", err)
-	}
-
-	nBody, err := r.body.WriteTo(w)
-	if err != nil {
-		return 8, fmt.Errorf("write body: %w", err)
-	}
-	return 8 + nBody, nil
+	nWritten, err := w.Write(buf.Bytes())
+	return int64(nWritten), err
 }
 
 type request struct {
