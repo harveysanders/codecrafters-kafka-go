@@ -56,7 +56,7 @@ func TestAPIVersionsResponse(t *testing.T) {
 	}
 	var gotBuf bytes.Buffer
 
-	_, err := resp.WriteTo(&gotBuf)
+	n, err := resp.WriteTo(&gotBuf)
 	require.NoError(t, err)
 
 	// message_size:        4 bytes
@@ -69,7 +69,7 @@ func TestAPIVersionsResponse(t *testing.T) {
 	// api_keys ___
 	// throttle_time_ms			4 bytes
 	// total 								20 bytes
-	// require.Equal(t, int64(20), n)
+	require.Equal(t, int64(20), n)
 
 	var gotMsgSize int32
 	err = binary.Read(&gotBuf, binary.BigEndian, &gotMsgSize)

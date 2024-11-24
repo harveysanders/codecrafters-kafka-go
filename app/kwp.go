@@ -60,8 +60,8 @@ func (r response) WriteTo(w io.Writer) (n int64, err error) {
 	if err != nil {
 		return 0, fmt.Errorf("write message size: %w", err)
 	}
-	nWritten, err := w.Write(buf.Bytes())
-	return int64(nWritten), err
+	_, err = w.Write(buf.Bytes())
+	return int64(r.msgSize), err
 }
 
 type request struct {
