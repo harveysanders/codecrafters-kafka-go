@@ -10,6 +10,7 @@ import (
 )
 
 type server struct {
+	app *app
 }
 
 func (s *server) ListenAndServe() error {
@@ -31,11 +32,11 @@ func (s *server) Serve(l net.Listener) error {
 			os.Exit(1)
 		}
 
-		go handle(conn)
+		go s.handle(conn)
 	}
 }
 
-func handle(conn net.Conn) {
+func (s *server) handle(conn net.Conn) {
 	for {
 		req := &request{}
 
@@ -56,7 +57,7 @@ func handle(conn net.Conn) {
 		}
 		switch req.header.requestAPIKey {
 		case APIKeyApiVersions:
-			handleAPIVersionsRequest(&resp, req)
+			s.app.handleAPIVersionsRequest()(&resp, req)
 		default:
 
 		}
@@ -72,7 +73,9 @@ func handle(conn net.Conn) {
 }
 
 func main() {
-	srv := server{}
+	srv := server{
+		app: newApp(),
+	}
 
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)

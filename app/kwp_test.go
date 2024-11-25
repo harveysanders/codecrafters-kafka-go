@@ -50,7 +50,7 @@ func TestAPIVersionsResponse(t *testing.T) {
 		header: responseHeader{correlationID: 12345},
 		body: ApiVersionsResponse{
 			apiKeys: []apiKey{
-				{val: APIKeyApiVersions, minVersion: 4, maxVersion: 4},
+				{index: APIKeyApiVersions, minVersion: 4, maxVersion: 4},
 			},
 		},
 	}

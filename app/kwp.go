@@ -8,10 +8,36 @@ import (
 )
 
 // API Keys (identifiers)
+// https://kafka.apache.org/protocol.html#protocol_api_keys
+type apiIndex int16
+
 const (
-	APIKeyProduce     = 0
-	APIKeyApiVersions = 18
+	APIKeyProduce                 apiIndex = 0
+	APIKeyApiVersions             apiIndex = 18
+	APIKeyDescribeTopicPartitions apiIndex = 75
 )
+
+type supportedAPIs map[apiIndex]struct {
+	minVersion, maxVersion int16
+}
+type app struct {
+	supportedAPIs supportedAPIs
+}
+
+func newApp() *app {
+	return &app{
+		supportedAPIs: supportedAPIs{
+			APIKeyApiVersions: {
+				minVersion: 3,
+				maxVersion: 4,
+			},
+			APIKeyDescribeTopicPartitions: {
+				minVersion: 0,
+				maxVersion: 0,
+			},
+		},
+	}
+}
 
 type responseHeader struct {
 	correlationID int32
@@ -65,7 +91,7 @@ type request struct {
 
 // requestHeader v2
 type requestHeader struct {
-	requestAPIKey     int16        // The API key for the request.
+	requestAPIKey     apiIndex     // The API key for the request.
 	requestAPIVersion int16        // The version of the API for the request.
 	correlationID     int32        // A unique ID for the request.
 	clientID          *string      // The client ID for the request.
@@ -90,7 +116,7 @@ func (r *request) ReadFrom(rdr io.Reader) (n int64, err error) {
 	}
 
 	r.header = requestHeader{}
-	r.header.requestAPIKey = int16(binary.BigEndian.Uint16(buf[:2]))
+	r.header.requestAPIKey = apiIndex(binary.BigEndian.Uint16(buf[:2]))
 	r.header.requestAPIVersion = int16(binary.BigEndian.Uint16(buf[2:4]))
 	r.header.correlationID = int32(binary.BigEndian.Uint32(buf[4:8]))
 
@@ -132,25 +158,31 @@ func (tf taggedFields) WriteTo(w io.Writer) (int64, error) {
 	return nWritten, nil
 }
 
-func handleAPIVersionsRequest(resp *response, req *request) {
-	minVersion := int16(3)
-	maxVersion := int16(4)
-	requestedVer := req.header.requestAPIVersion
-
-	if requestedVer > maxVersion || requestedVer < minVersion {
-		resp.body = ApiVersionsResponse{
-			errorCode: APIVersionsErrUnsupportedVersion,
-		}
-		return
+func (app *app) handleAPIVersionsRequest() func(resp *response, req *request) {
+	minVersion := app.supportedAPIs[APIKeyApiVersions].minVersion
+	maxVersion := app.supportedAPIs[APIKeyApiVersions].maxVersion
+	apiKeys := make([]apiKey, 0, len(app.supportedAPIs))
+	for key, api := range app.supportedAPIs {
+		apiKeys = append(apiKeys, apiKey{
+			index:      key,
+			minVersion: api.minVersion,
+			maxVersion: api.maxVersion,
+		})
 	}
-	resp.body = ApiVersionsResponse{
-		apiKeys: []apiKey{
-			{
-				val:        APIKeyApiVersions,
-				minVersion: minVersion,
-				maxVersion: maxVersion,
-			},
-		},
+
+	return func(resp *response, req *request) {
+		requestedVer := req.header.requestAPIVersion
+
+		if requestedVer > maxVersion || requestedVer < minVersion {
+			resp.body = ApiVersionsResponse{
+				errorCode: APIVersionsErrUnsupportedVersion,
+			}
+			return
+		}
+
+		resp.body = ApiVersionsResponse{
+			apiKeys: apiKeys,
+		}
 	}
 }
 
@@ -161,14 +193,14 @@ const (
 )
 
 type apiKey struct {
-	val          int16
+	index        apiIndex
 	minVersion   int16
 	maxVersion   int16
 	taggedFields byte // Unused
 }
 
 func (a apiKey) WriteTo(w io.Writer) (int64, error) {
-	if err := binary.Write(w, binary.BigEndian, a.val); err != nil {
+	if err := binary.Write(w, binary.BigEndian, a.index); err != nil {
 		return 0, fmt.Errorf("write api_key: %w", err)
 	}
 	if err := binary.Write(w, binary.BigEndian, a.minVersion); err != nil {

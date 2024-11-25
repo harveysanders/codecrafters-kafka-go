@@ -11,7 +11,14 @@ import (
 )
 
 func TestServer(t *testing.T) {
-	srv := server{}
+	app := &app{
+		supportedAPIs: supportedAPIs{
+			APIKeyApiVersions: {
+				minVersion: 3, maxVersion: 4,
+			},
+		},
+	}
+	srv := server{app}
 
 	go func(t *testing.T) {
 		err := srv.ListenAndServe()
@@ -45,6 +52,7 @@ func TestServer(t *testing.T) {
 		// correlation_id:      4 bytes
 		// error_code: 					2 bytes
 		// []api_keys ___				1 byte (len)
+		// 2x
 		// 	api_key							2 bytes
 		// 	min_version					2 bytes
 		// 	max_version					2 bytes
