@@ -142,7 +142,11 @@ func handleAPIVersionsRequest(resp *response, req *request) {
 	}
 	resp.body = ApiVersionsResponse{
 		apiKeys: []apiKey{
-			{val: APIKeyApiVersions, minVersion: 4, maxVersion: 4},
+			{
+				val:        APIKeyApiVersions,
+				minVersion: 3,
+				maxVersion: 4,
+			},
 		},
 	}
 }
