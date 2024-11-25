@@ -44,15 +44,13 @@ func handle(conn net.Conn) {
 	fmt.Printf("read %d bytes from request\n", nRead)
 
 	resp := response{
-		header: responseHeader{correlationID: req.header.correlationID},
+		header: responseHeader{
+			correlationID: req.header.correlationID,
+		},
 	}
 	switch req.header.requestAPIKey {
 	case APIKeyApiVersions:
-		resp.body = ApiVersionsResponse{
-			apiKeys: []apiKey{
-				{val: APIKeyApiVersions, minVersion: 4, maxVersion: 4},
-			},
-		}
+		handleAPIVersionsRequest(&resp, req)
 	default:
 
 	}

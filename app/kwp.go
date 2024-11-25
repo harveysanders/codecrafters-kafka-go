@@ -133,6 +133,20 @@ func (tf taggedFields) WriteTo(w io.Writer) (int64, error) {
 	return nWritten, nil
 }
 
+func handleAPIVersionsRequest(resp *response, req *request) {
+	if req.header.requestAPIVersion > 4 {
+		resp.body = ApiVersionsResponse{
+			errorCode: APIVersionsErrUnsupportedVersion,
+		}
+		return
+	}
+	resp.body = ApiVersionsResponse{
+		apiKeys: []apiKey{
+			{val: APIKeyApiVersions, minVersion: 4, maxVersion: 4},
+		},
+	}
+}
+
 const (
 	// Denotes the version of ApiVersions requested by the client is not supported by the broker.
 	// Assume that your broker only supports versions 0 to 4.
@@ -173,17 +187,7 @@ func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
 	if err := binary.Write(w, binary.BigEndian, a.errorCode); err != nil {
 		return 0, fmt.Errorf("write error code: %w", err)
 	}
-	// apiKeySize := 3 * 2 // 3 int16 fields
-	// data := make([]byte, 0, len(a.apiKeys)*apiKeySize)
-	// buf := bytes.NewBuffer(data)
-	// for _, apiKey := range a.apiKeys {
-	// 	_, err := apiKey.WriteTo(buf)
-	// 	if err != nil {
-	// 		return 0, err
-	// 	}
-	// }
 
-	// nW, err := w.Write(buf.Bytes())
 	nW, err := a.apiKeys.WriteTo(w)
 	if err != nil {
 		return 0, fmt.Errorf("write api_keys:= %w", err)
