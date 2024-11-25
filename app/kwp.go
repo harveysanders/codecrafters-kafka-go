@@ -83,19 +83,18 @@ func (r *request) ReadFrom(rdr io.Reader) (n int64, err error) {
 		return 0, fmt.Errorf("read message size: %w", err)
 	}
 
+	buf := make([]byte, r.msgSize)
+	nRead, err := io.ReadFull(rdr, buf)
+	if err != nil {
+		return int64(4 + nRead), fmt.Errorf("read full msg: %w", err)
+	}
+
 	r.header = requestHeader{}
-	if err := binary.Read(rdr, binary.BigEndian, &r.header.requestAPIKey); err != nil {
-		return 4, fmt.Errorf("read request API key: %w", err)
-	}
+	r.header.requestAPIKey = int16(binary.BigEndian.Uint16(buf[:2]))
+	r.header.requestAPIVersion = int16(binary.BigEndian.Uint16(buf[2:4]))
+	r.header.correlationID = int32(binary.BigEndian.Uint32(buf[4:8]))
 
-	if err := binary.Read(rdr, binary.BigEndian, &r.header.requestAPIVersion); err != nil {
-		return 4 + 2, fmt.Errorf("read request API version: %w", err)
-	}
-
-	if err := binary.Read(rdr, binary.BigEndian, &r.header.correlationID); err != nil {
-		return 4 + 2 + 2, fmt.Errorf("read correlation ID: %w", err)
-	}
-	return 4 + 2 + 2 + 4, nil
+	return int64(4 + nRead), nil
 }
 
 type taggedField []byte

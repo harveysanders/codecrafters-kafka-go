@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -34,34 +36,39 @@ func (s *server) Serve(l net.Listener) error {
 }
 
 func handle(conn net.Conn) {
-	req := &request{}
+	for {
+		req := &request{}
 
-	nRead, err := req.ReadFrom(conn)
-	if err != nil {
-		fmt.Printf("Error reading request: %v\n", err)
-		return
+		nRead, err := req.ReadFrom(conn)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			fmt.Printf("Error reading request: %v\n", err)
+			return
+		}
+		fmt.Printf("read %d bytes from request\n", nRead)
+
+		resp := response{
+			header: responseHeader{
+				correlationID: req.header.correlationID,
+			},
+		}
+		switch req.header.requestAPIKey {
+		case APIKeyApiVersions:
+			handleAPIVersionsRequest(&resp, req)
+		default:
+
+		}
+
+		n, err := resp.WriteTo(conn)
+		if err != nil {
+			fmt.Printf("Error writing response %v\n", err)
+			return
+		}
+
+		fmt.Printf("wrote response of len %d\n", n)
 	}
-	fmt.Printf("read %d bytes from request\n", nRead)
-
-	resp := response{
-		header: responseHeader{
-			correlationID: req.header.correlationID,
-		},
-	}
-	switch req.header.requestAPIKey {
-	case APIKeyApiVersions:
-		handleAPIVersionsRequest(&resp, req)
-	default:
-
-	}
-
-	n, err := resp.WriteTo(conn)
-	if err != nil {
-		fmt.Printf("Error writing response %v\n", err)
-		return
-	}
-
-	fmt.Printf("wrote response of len %d\n", n)
 }
 
 func main() {

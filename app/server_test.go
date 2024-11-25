@@ -78,7 +78,7 @@ func TestServer(t *testing.T) {
 		//  		- .api_key (18)
 		require.Equal(t, []byte{0x0, 0x12}, respBuf[7:9])
 		//  		- .min_version (4)
-		require.Equal(t, []byte{0x0, 0x4}, respBuf[9:11])
+		require.Equal(t, []byte{0x0, 0x3}, respBuf[9:11])
 		//  		- .max_version (4)
 		require.Equal(t, []byte{0x0, 0x4}, respBuf[11:13])
 		//  		- .TAG_BUFFER
