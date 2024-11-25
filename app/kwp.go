@@ -133,7 +133,11 @@ func (tf taggedFields) WriteTo(w io.Writer) (int64, error) {
 }
 
 func handleAPIVersionsRequest(resp *response, req *request) {
-	if req.header.requestAPIVersion > 4 {
+	minVersion := int16(3)
+	maxVersion := int16(4)
+	requestedVer := req.header.requestAPIVersion
+
+	if requestedVer > maxVersion || requestedVer < minVersion {
 		resp.body = ApiVersionsResponse{
 			errorCode: APIVersionsErrUnsupportedVersion,
 		}
@@ -143,8 +147,8 @@ func handleAPIVersionsRequest(resp *response, req *request) {
 		apiKeys: []apiKey{
 			{
 				val:        APIKeyApiVersions,
-				minVersion: 3,
-				maxVersion: 4,
+				minVersion: minVersion,
+				maxVersion: maxVersion,
 			},
 		},
 	}
