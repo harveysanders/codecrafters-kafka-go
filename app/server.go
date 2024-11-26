@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -39,7 +40,6 @@ func (s *server) Serve(l net.Listener) error {
 func (s *server) handle(conn net.Conn) {
 	for {
 		req := &request{}
-
 		nRead, err := req.ReadFrom(conn)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -54,10 +54,13 @@ func (s *server) handle(conn net.Conn) {
 			header: responseHeader{
 				correlationID: req.header.correlationID,
 			},
+			body: &bytes.Buffer{},
 		}
 		switch req.header.requestAPIKey {
 		case APIKeyApiVersions:
 			s.app.handleAPIVersionsRequest()(&resp, req)
+		case APIKeyDescribeTopicPartitions:
+			s.app.handleDescribeTopicPartitionsRequest()(&resp, req)
 		default:
 
 		}

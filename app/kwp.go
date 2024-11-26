@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
+	"log"
 )
 
 // API Keys (identifiers)
@@ -89,15 +89,16 @@ func (r response) WriteTo(w io.Writer) (n int64, err error) {
 type request struct {
 	msgSize int32
 	header  requestHeader
+	body    io.Reader
 }
 
 // requestHeader v2
 type requestHeader struct {
-	requestAPIKey     apiIndex     // The API key for the request.
-	requestAPIVersion int16        // The version of the API for the request.
-	correlationID     int32        // A unique ID for the request.
-	clientID          *string      // The client ID for the request.
-	tagBuffer         taggedFields // Optional tagged fields.
+	requestAPIKey     apiIndex        // The API key for the request.
+	requestAPIVersion int16           // The version of the API for the request.
+	correlationID     int32           // A unique ID for the request.
+	clientID          *nullableString // The client ID for the request.
+	tagBuffer         taggedFields    // Optional tagged fields.
 }
 
 func (r *request) UnmarshalBinary(data []byte) error {
@@ -121,6 +122,14 @@ func (r *request) ReadFrom(rdr io.Reader) (n int64, err error) {
 	r.header.requestAPIKey = apiIndex(binary.BigEndian.Uint16(buf[:2]))
 	r.header.requestAPIVersion = int16(binary.BigEndian.Uint16(buf[2:4]))
 	r.header.correlationID = int32(binary.BigEndian.Uint32(buf[4:8]))
+	clientID := nullableString("")
+	nClientID, err := clientID.ReadFrom(bytes.NewReader(buf[8:]))
+	if err != nil {
+		return int64(4 + nRead), fmt.Errorf("read client ID: %w", err)
+	}
+	r.header.clientID = &clientID
+	offset := 8 + nClientID + 1 // 1 byte for tagged fields length
+	r.body = bytes.NewReader(buf[offset:])
 
 	return int64(4 + nRead), nil
 }
@@ -244,13 +253,37 @@ func (a apiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
 	return nW + 4 + nTagged, err
 }
 
+func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req *request) {
+	minVersion := app.supportedAPIs[APIKeyDescribeTopicPartitions].minVersion
+	maxVersion := app.supportedAPIs[APIKeyDescribeTopicPartitions].maxVersion
+	return func(resp *response, req *request) {
+		requestedVer := req.header.requestAPIVersion
+
+		if requestedVer > maxVersion || requestedVer < minVersion {
+			resp.body = apiVersionsResponse{
+				errorCode: APIVersionsErrUnsupportedVersion,
+			}
+			return
+		}
+
+		// Read request from body
+		br := bufio.NewReader(req.body)
+		dtpReq := describeTopicPartitionsRequest{}
+		_, err := dtpReq.ReadFrom(br)
+		if err != nil {
+			log.Printf("Error reading describe topic partitions request: %v\n", err)
+			return
+		}
+	}
+}
+
 type topic struct {
 	name      compactString
 	tagBuffer taggedFields
 }
 
 func (c *topic) ReadFrom(r io.Reader) (int64, error) {
-	c = &topic{}
+	*c = topic{}
 	return c.name.ReadFrom(r)
 }
 
@@ -258,24 +291,61 @@ type describeTopicPartitionsRequest struct {
 	topics compactArrayReq[*topic]
 }
 
+func (d *describeTopicPartitionsRequest) ReadFrom(r io.Reader) (int64, error) {
+	topics := compactArrayReq[*topic]{}
+	n, err := topics.ReadFrom(r)
+	d.topics = topics
+	return n, err
+}
+
+// Represents a sequence of characters or null. For non-null strings,
+// first the length N is given as an INT16. Then N bytes follow which are
+// the UTF-8 encoding of the character sequence. A null value is encoded
+// with length of -1 and there are no following bytes.
+type nullableString string
+
+func (ns *nullableString) ReadFrom(r io.Reader) (int64, error) {
+	var strLen uint16
+	err := binary.Read(r, binary.BigEndian, &strLen)
+	if err != nil {
+		return 0, fmt.Errorf("read string length: %w", err)
+	}
+	if strLen < 0 {
+		return 2, nil
+	}
+	if strLen == 0 {
+		*ns = ""
+		return 2, nil
+	}
+	buf := make([]byte, strLen)
+	nRead, err := io.ReadFull(r, buf)
+	if err != nil {
+		return 2, fmt.Errorf("read string contents: %w", err)
+	}
+	*ns = nullableString(buf)
+	return int64(nRead + 2), nil
+}
+
 // compactString contains a 32-bit unsigned varint representing the
 // string's length + 1, followed by the string bytes.
 type compactString string
 
 func (c *compactString) ReadFrom(r io.Reader) (int64, error) {
-	var buf bytes.Buffer
-	nInt, err := io.CopyN(&buf, r, binary.MaxVarintLen32)
+	rdr := bufio.NewReader(r)
+
+	strLenPlus1, err := binary.ReadUvarint(rdr)
 	if err != nil {
-		return int64(nInt), fmt.Errorf("reading string length: %w", err)
+		return int64(1), fmt.Errorf("reading string length: %w", err)
 	}
-	strLenPlus1, _ := binary.Uvarint(buf.Bytes()[:nInt])
-	if n, err := io.CopyN(&buf, r, nInt-int64(strLenPlus1)); err != nil {
-		if !errors.Is(err, io.EOF) {
-			return nInt + int64(n), fmt.Errorf("reading string contents: %w", err)
-		}
+
+	buf := make([]byte, strLenPlus1)
+
+	n, err := io.ReadFull(rdr, buf)
+	if err != nil {
+		return 1, fmt.Errorf("reading string contents: %w", err)
 	}
-	*c = compactString(buf.Bytes()[nInt : uint64(nInt)+strLenPlus1-1])
-	return int64(buf.Len()), nil
+	*c = compactString(buf)
+	return int64(n + 1), nil
 }
 
 type compactArrayResp[T io.WriterTo] []T
@@ -301,21 +371,16 @@ func (c compactArrayResp[T]) WriteTo(w io.Writer) (int64, error) {
 type compactArrayReq[T io.ReaderFrom] []T
 
 func (c *compactArrayReq[T]) ReadFrom(r io.Reader) (int64, error) {
-	// var buf bytes.Buffer
-	// nInt, err := io.CopyN(&buf, r, binary.MaxVarintLen64)
-	// if err != nil {
-	// 	if !errors.Is(err, io.EOF) {
-	// 		return nInt, fmt.Errorf("reading array length: %w", err)
-	// 	}
-	// }
-
-	rdr := bufio.NewReader(r)
-	arrLen, err := binary.ReadUvarint(rdr)
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReader(r)
+	}
+	arrLen, err := binary.ReadUvarint(br)
 	if err != nil {
-		return int64(rdr.Buffered()), fmt.Errorf("reading array length: %w", err)
+		return 0, fmt.Errorf("reading array length: %w", err)
 	}
 	// TODO: Fix the read bytes count from Uvarint.
-	n := 1 + rdr.Buffered()
+	n := 1
 	// Length has padding of + 1 to represent nulls.
 	if arrLen == 0 {
 		// Array is nil.
@@ -323,14 +388,10 @@ func (c *compactArrayReq[T]) ReadFrom(r io.Reader) (int64, error) {
 	}
 	arrLen -= 1
 
-	if arrLen == 0 {
-		return int64(n), nil
-	}
-
 	items := make([]T, arrLen)
 
 	for _, v := range items {
-		nRead, err := v.ReadFrom(rdr)
+		nRead, err := v.ReadFrom(br)
 		if err != nil {
 			return int64(nRead), err
 		}

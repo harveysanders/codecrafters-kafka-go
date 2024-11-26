@@ -42,6 +42,10 @@ func TestServer(t *testing.T) {
 		client, err := net.Dial("tcp", "127.0.0.1:9092")
 		require.NoError(t, err)
 
+		defer func() {
+			_ = client.Close()
+		}()
+
 		nW, err := client.Write(request)
 		require.NoError(t, err)
 		require.Equal(t, len(request), nW)
@@ -97,4 +101,63 @@ func TestServer(t *testing.T) {
 		require.Equal(t, []byte{0x0}, respBuf[18:19])
 	})
 
+}
+
+func TestDescribeTopicPartitions(t *testing.T) {
+	app := &app{
+		supportedAPIs: supportedAPIs{
+			APIKeyDescribeTopicPartitions: {},
+		},
+	}
+	srv := server{app}
+
+	go func(t *testing.T) {
+		err := srv.ListenAndServe()
+		require.NoError(t, err)
+	}(t)
+
+	t.Run("'DescribeTopicPartitions' request", func(t *testing.T) {
+		request := []byte{
+			0x00, 0x00, 0x00, 0x20, // message_size: 32
+			0x00, 0x4b, // request_api_key: 75
+			0x00, 0x00, // request_api_version: v0
+			0x00, 0x00, 0x00, 0x07, // correlation_id: 7
+			// client_software_name
+			0x00, 0x09, // length  9
+			0x6b, 0x61, 0x66, 0x6b, 0x61, 0x2d, 0x63, 0x6c, 0x69, // kafka-cli
+			0x00, // tag buffer
+			// Body
+			0x02, // topics array length -1 (1)
+			// ___
+			0x04,             // topic name length -1 (3)
+			0x66, 0x6f, 0x6f, // "foo"
+			0x00,                   // topic tag buffer
+			0x00, 0x00, 0x00, 0x64, // partition limit: 100
+			0xff, // cursor - null
+			0x00, // tag buffer
+		}
+
+		// wait for server to start
+		time.Sleep(20 * time.Millisecond)
+
+		client, err := net.Dial("tcp", "127.0.0.1:9092")
+		require.NoError(t, err)
+
+		defer func() {
+			_ = client.Close()
+		}()
+
+		nWritten, err := client.Write(request)
+		require.NoError(t, err)
+		require.Equal(t, len(request), nWritten)
+
+		var msgSize int32
+		err = binary.Read(client, binary.BigEndian, &msgSize)
+		require.NoError(t, err)
+
+		buf := make([]byte, msgSize)
+		_, err = io.ReadFull(client, buf)
+		require.NoError(t, err)
+
+	})
 }
