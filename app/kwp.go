@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -174,13 +176,13 @@ func (app *app) handleAPIVersionsRequest() func(resp *response, req *request) {
 		requestedVer := req.header.requestAPIVersion
 
 		if requestedVer > maxVersion || requestedVer < minVersion {
-			resp.body = ApiVersionsResponse{
+			resp.body = apiVersionsResponse{
 				errorCode: APIVersionsErrUnsupportedVersion,
 			}
 			return
 		}
 
-		resp.body = ApiVersionsResponse{
+		resp.body = apiVersionsResponse{
 			apiKeys: apiKeys,
 		}
 	}
@@ -215,14 +217,14 @@ func (a apiKey) WriteTo(w io.Writer) (int64, error) {
 	return 6, nil
 }
 
-type ApiVersionsResponse struct {
-	errorCode      int16                //The top-level error code.
-	apiKeys        compactArray[apiKey] // 	The APIs supported by the broker.
-	throttleTimeMs int32                // The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota.
-	taggedFields   taggedFields         // Unused
+type apiVersionsResponse struct {
+	errorCode      int16                    //The top-level error code.
+	apiKeys        compactArrayResp[apiKey] // 	The APIs supported by the broker.
+	throttleTimeMs int32                    // The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota.
+	taggedFields   taggedFields             // Unused
 }
 
-func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
+func (a apiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
 	if err := binary.Write(w, binary.BigEndian, a.errorCode); err != nil {
 		return 0, fmt.Errorf("write error code: %w", err)
 	}
@@ -242,9 +244,43 @@ func (a ApiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
 	return nW + 4 + nTagged, err
 }
 
-type compactArray[T io.WriterTo] []T
+type topic struct {
+	name      compactString
+	tagBuffer taggedFields
+}
 
-func (c compactArray[T]) WriteTo(w io.Writer) (int64, error) {
+func (c *topic) ReadFrom(r io.Reader) (int64, error) {
+	c = &topic{}
+	return c.name.ReadFrom(r)
+}
+
+type describeTopicPartitionsRequest struct {
+	topics compactArrayReq[*topic]
+}
+
+// compactString contains a 32-bit unsigned varint representing the
+// string's length + 1, followed by the string bytes.
+type compactString string
+
+func (c *compactString) ReadFrom(r io.Reader) (int64, error) {
+	var buf bytes.Buffer
+	nInt, err := io.CopyN(&buf, r, binary.MaxVarintLen32)
+	if err != nil {
+		return int64(nInt), fmt.Errorf("reading string length: %w", err)
+	}
+	strLenPlus1, _ := binary.Uvarint(buf.Bytes()[:nInt])
+	if n, err := io.CopyN(&buf, r, nInt-int64(strLenPlus1)); err != nil {
+		if !errors.Is(err, io.EOF) {
+			return nInt + int64(n), fmt.Errorf("reading string contents: %w", err)
+		}
+	}
+	*c = compactString(buf.Bytes()[nInt : uint64(nInt)+strLenPlus1-1])
+	return int64(buf.Len()), nil
+}
+
+type compactArrayResp[T io.WriterTo] []T
+
+func (c compactArrayResp[T]) WriteTo(w io.Writer) (int64, error) {
 	buf := make([]byte, 8)
 	n := binary.PutUvarint(buf, uint64(len(c)+1))
 	if _, err := w.Write(buf[:n]); err != nil {
@@ -260,4 +296,46 @@ func (c compactArray[T]) WriteTo(w io.Writer) (int64, error) {
 		nWritten += n
 	}
 	return nWritten, nil
+}
+
+type compactArrayReq[T io.ReaderFrom] []T
+
+func (c *compactArrayReq[T]) ReadFrom(r io.Reader) (int64, error) {
+	// var buf bytes.Buffer
+	// nInt, err := io.CopyN(&buf, r, binary.MaxVarintLen64)
+	// if err != nil {
+	// 	if !errors.Is(err, io.EOF) {
+	// 		return nInt, fmt.Errorf("reading array length: %w", err)
+	// 	}
+	// }
+
+	rdr := bufio.NewReader(r)
+	arrLen, err := binary.ReadUvarint(rdr)
+	if err != nil {
+		return int64(rdr.Buffered()), fmt.Errorf("reading array length: %w", err)
+	}
+	// TODO: Fix the read bytes count from Uvarint.
+	n := 1 + rdr.Buffered()
+	// Length has padding of + 1 to represent nulls.
+	if arrLen == 0 {
+		// Array is nil.
+		return int64(n), nil
+	}
+	arrLen -= 1
+
+	if arrLen == 0 {
+		return int64(n), nil
+	}
+
+	items := make([]T, arrLen)
+
+	for _, v := range items {
+		nRead, err := v.ReadFrom(rdr)
+		if err != nil {
+			return int64(nRead), err
+		}
+		n += int(nRead)
+	}
+	*c = items
+	return int64(n), nil
 }
