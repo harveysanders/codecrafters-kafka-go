@@ -277,6 +277,49 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 	}
 }
 
+type topics []topic
+
+// ReadFrom reads the topics from the reader. The first bytes are
+// the length of the array, serialized as a 32-bit unsigned variable-length
+// integer. The following bytes are the topics.
+// If the length is 0, the array is nil. If the length field is 1, the array
+// length is 0 and so on.
+func (t *topics) ReadFrom(r io.Reader) (int64, error) {
+	length, n, err := readCompactArrayLen(r)
+	if err != nil {
+		return 0, fmt.Errorf("reading topics length: %w", err)
+	}
+
+	if length == 0 {
+		// Array is nil.
+		*t = nil
+		return n, nil
+	}
+	length -= 1
+	topics := make([]topic, 0, length)
+	for i := 0; i < int(length); i++ {
+		topic := topic{}
+		topic.ReadFrom(r)
+		topics = append(topics, topic)
+	}
+	*t = topics
+	return n, nil
+}
+
+func readCompactArrayLen(r io.Reader) (len uint64, n int64, err error) {
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReader(r)
+	}
+	arrLen, err := binary.ReadUvarint(br)
+	if err != nil {
+		return 0, 0, fmt.Errorf("reading array length: %w", err)
+	}
+	// TODO: Fix the read bytes count from Uvarint.
+	// https://gophers.slack.com/archives
+	return arrLen, 1, nil
+}
+
 type topic struct {
 	name      compactString
 	tagBuffer taggedFields
@@ -288,11 +331,11 @@ func (c *topic) ReadFrom(r io.Reader) (int64, error) {
 }
 
 type describeTopicPartitionsRequest struct {
-	topics compactArrayReq[*topic]
+	topics topics
 }
 
 func (d *describeTopicPartitionsRequest) ReadFrom(r io.Reader) (int64, error) {
-	topics := compactArrayReq[*topic]{}
+	topics := topics{}
 	n, err := topics.ReadFrom(r)
 	d.topics = topics
 	return n, err
@@ -331,14 +374,17 @@ func (ns *nullableString) ReadFrom(r io.Reader) (int64, error) {
 type compactString string
 
 func (c *compactString) ReadFrom(r io.Reader) (int64, error) {
-	rdr := bufio.NewReader(r)
+	rdr, ok := r.(*bufio.Reader)
+	if !ok {
+		rdr = bufio.NewReader(r)
+	}
 
 	strLenPlus1, err := binary.ReadUvarint(rdr)
 	if err != nil {
 		return int64(1), fmt.Errorf("reading string length: %w", err)
 	}
 
-	buf := make([]byte, strLenPlus1)
+	buf := make([]byte, strLenPlus1-1)
 
 	n, err := io.ReadFull(rdr, buf)
 	if err != nil {
@@ -366,37 +412,4 @@ func (c compactArrayResp[T]) WriteTo(w io.Writer) (int64, error) {
 		nWritten += n
 	}
 	return nWritten, nil
-}
-
-type compactArrayReq[T io.ReaderFrom] []T
-
-func (c *compactArrayReq[T]) ReadFrom(r io.Reader) (int64, error) {
-	br, ok := r.(*bufio.Reader)
-	if !ok {
-		br = bufio.NewReader(r)
-	}
-	arrLen, err := binary.ReadUvarint(br)
-	if err != nil {
-		return 0, fmt.Errorf("reading array length: %w", err)
-	}
-	// TODO: Fix the read bytes count from Uvarint.
-	n := 1
-	// Length has padding of + 1 to represent nulls.
-	if arrLen == 0 {
-		// Array is nil.
-		return int64(n), nil
-	}
-	arrLen -= 1
-
-	items := make([]T, arrLen)
-
-	for _, v := range items {
-		nRead, err := v.ReadFrom(br)
-		if err != nil {
-			return int64(nRead), err
-		}
-		n += int(nRead)
-	}
-	*c = items
-	return int64(n), nil
 }

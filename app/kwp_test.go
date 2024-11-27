@@ -22,6 +22,8 @@ func TestRequestUnmarshalBinary(t *testing.T) {
 				0x00, 0x12, //             request_api_key:     18
 				0x00, 0x04, //             request_api_version: 4
 				0x6f, 0x7f, 0xc6, 0x61, // correlation_id:      1870644833
+				//  rest of the message.. details are not important for this test
+				0x00, 0x09, 0x6b, 0x61, 0x66, 0x6b, 0x61, 0x2d, 0x63, 0x6c, 0x69, 0x00, 0x0a, 0x6b, 0x61, 0x66, 0x6b, 0x61, 0x2d, 0x63, 0x6c, 0x69, 0x04, 0x30, 0x2e, 0x31, 0x00,
 			},
 			wantReq: request{
 				msgSize: 35,
@@ -98,7 +100,7 @@ func TestCompactString(t *testing.T) {
 		}{
 			{input: []byte{0x04, 0x66, 0x6f, 0x6f, 00},
 				want:     "foo",
-				wantRead: 5, // 1 for length, 3+1 for string itself
+				wantRead: 4, // 1 for length, 3 for string itself
 			},
 		}
 
@@ -107,23 +109,9 @@ func TestCompactString(t *testing.T) {
 				var got compactString
 				n, err := got.ReadFrom(bytes.NewReader(tc.input))
 				require.NoError(t, err)
-				require.Equal(t, int64(5), n)
+				require.Equal(t, tc.wantRead, n)
 			})
 		}
 
-	})
-}
-
-func TestCompactArray(t *testing.T) {
-	t.Run("can be read from a reader", func(t *testing.T) {
-		input := []byte{
-			0x02,                       // number of items + 1
-			0x04, 0x66, 0x6f, 0x6f, 00, // topic: "foo" (compactString)
-		}
-		var got compactArrayReq[*topic]
-		n, err := got.ReadFrom(bytes.NewReader(input))
-		require.NoError(t, err)
-		require.Len(t, got, 1)
-		require.Equal(t, int64(6), n)
 	})
 }
