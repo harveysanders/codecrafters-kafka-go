@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+
+	"github.com/google/uuid"
 )
 
 // API Keys (identifiers)
@@ -43,6 +45,7 @@ func newApp() *app {
 
 type responseHeader struct {
 	correlationID int32
+	tagBuffer     taggedFields
 }
 type response struct {
 	msgSize int32
@@ -70,6 +73,12 @@ func (r response) WriteTo(w io.Writer) (n int64, err error) {
 	err = binary.Write(&buf, binary.BigEndian, r.header.correlationID)
 	if err != nil {
 		return 0, fmt.Errorf("write header: %w", err)
+	}
+
+	// write tag buffer
+	_, err = r.header.tagBuffer.WriteTo(&buf)
+	if err != nil {
+		return 0, fmt.Errorf("write tag buffer: %w", err)
 	}
 
 	_, err = r.body.WriteTo(&buf)
@@ -274,8 +283,26 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 			log.Printf("Error reading describe topic partitions request: %v\n", err)
 			return
 		}
+
+		respBody := describeTopicPartitionsResponse{
+			topics: []topicResponse{
+				{
+					errorCode:  ErrUnknownTopicOrPartition,
+					topicID:    uuid.Nil,
+					name:       dtpReq.topics[0].name,
+					partitions: []partition{},
+				},
+			},
+		}
+
+		resp.body = respBody
+
 	}
 }
+
+const (
+	ErrUnknownTopicOrPartition int16 = 3
+)
 
 type topics []topic
 
@@ -369,6 +396,92 @@ func (ns *nullableString) ReadFrom(r io.Reader) (int64, error) {
 	return int64(nRead + 2), nil
 }
 
+type partition struct {
+	errorCode              int16
+	partitionIndex         int32
+	leaderID               int32
+	leaderEpoch            int32
+	replicaNodes           []int32
+	isrNodes               []int32
+	eligibleLeaderReplicas []int32
+	lastKnownELR           []int32
+	offlineReplicas        []int32
+}
+
+func (p partition) WriteTo(w io.Writer) (int64, error) {
+	// TODO:
+	return 0, nil
+}
+
+type topicResponse struct {
+	errorCode                 int16
+	name                      compactString
+	topicID                   uuid.UUID
+	isInternal                bool
+	partitions                []partition
+	topicAuthorizedOperations int32
+}
+
+func (t topicResponse) WriteTo(w io.Writer) (int64, error) {
+	bw, ok := w.(*bufio.Writer)
+	if !ok {
+		bw = bufio.NewWriter(w)
+	}
+	if err := binary.Write(bw, binary.BigEndian, t.errorCode); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write errorCode: %w", err)
+	}
+	if _, err := t.name.WriteTo(bw); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write topicID: %w", err)
+	}
+	if err := binary.Write(bw, binary.BigEndian, t.topicID); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write topicID: %w", err)
+	}
+	if err := binary.Write(bw, binary.BigEndian, t.isInternal); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write isInternal: %w", err)
+	}
+	// partitions
+	partitions := make(compactArrayResp[partition], 0, len(t.partitions))
+	for _, p := range t.partitions {
+		partitions = append(partitions, p)
+	}
+	if _, err := partitions.WriteTo(bw); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write partitions: %w", err)
+	}
+	return int64(bw.Buffered()), nil
+}
+
+type describeTopicPartitionsResponse struct {
+	throttleTimeMS int32
+	topics         []topicResponse
+	nextCursor     struct {
+		topicName      compactString
+		partitionIndex int32
+	}
+}
+
+func (d describeTopicPartitionsResponse) WriteTo(w io.Writer) (int64, error) {
+	bw, ok := w.(*bufio.Writer)
+	if !ok {
+		bw = bufio.NewWriter(w)
+	}
+	err := binary.Write(bw, binary.BigEndian, d.throttleTimeMS)
+	if err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write throttleTimeMS: %w", err)
+	}
+	topics := compactArrayResp[topicResponse]{}
+
+	for _, t := range d.topics {
+		topics = append(topics, t)
+	}
+	if _, err = topics.WriteTo(bw); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write topics: %w", err)
+	}
+	if err := bw.Flush(); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("flushing buffer: %w", err)
+	}
+	return int64(bw.Buffered()), nil
+}
+
 // compactString contains a 32-bit unsigned varint representing the
 // string's length + 1, followed by the string bytes.
 type compactString string
@@ -392,6 +505,20 @@ func (c *compactString) ReadFrom(r io.Reader) (int64, error) {
 	}
 	*c = compactString(buf)
 	return int64(n + 1), nil
+}
+
+func (c *compactString) WriteTo(w io.Writer) (int64, error) {
+	buf := make([]byte, 0, binary.MaxVarintLen32+len(*c))
+
+	var length uint64
+	if c != nil {
+		length = uint64(len(*c) + 1)
+	}
+	buf = binary.AppendUvarint(buf, length)
+	buf = append(buf, *c...)
+
+	n, err := w.Write(buf)
+	return int64(n), err
 }
 
 type compactArrayResp[T io.WriterTo] []T

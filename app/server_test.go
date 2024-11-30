@@ -155,9 +155,33 @@ func TestDescribeTopicPartitions(t *testing.T) {
 		err = binary.Read(client, binary.BigEndian, &msgSize)
 		require.NoError(t, err)
 
-		buf := make([]byte, msgSize)
-		_, err = io.ReadFull(client, buf)
+		t.Log("msgSize", msgSize)
+		respBuf := make([]byte, msgSize)
+		_, err = io.ReadFull(client, respBuf)
 		require.NoError(t, err)
+
+		// Correlation ID
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x07}, respBuf[0:4])
+		// Tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[4:5])
+		// throttle_time_ms: 0
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[5:9])
+		// topics nullable compact array length +1:  1 item (val: 2)
+		require.Equal(t, []byte{0x02}, respBuf[9:10])
+		// >> topic [0] _______________________
+		// >> error code: int16(3) UNKNOWN_TOPIC
+		require.Equal(t, []byte{0x00, 0x03}, respBuf[10:12])
+		// >> topic name - nullable compact string: length: 3 - val 4
+		require.Equal(t, []byte{0x04}, respBuf[12:13])
+		// >> topic name: "foo"
+		require.Equal(t, []byte{0x66, 0x6f, 0x6f}, respBuf[13:16])
+		// >> topic ID - 16byte UUID - null
+		// >> (00000000-0000-0000-0000-000000000000)
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, respBuf[16:32])
+		// >> is_internal: false
+		require.Equal(t, []byte{0x00}, respBuf[32:33])
+		// >> partitions - nullable compact array length +1: 0 items (val: 1)
+		require.Equal(t, []byte{0x01}, respBuf[33:34])
 
 	})
 }
