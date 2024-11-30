@@ -182,6 +182,8 @@ func TestDescribeTopicPartitions(t *testing.T) {
 		require.Equal(t, []byte{0x00}, respBuf[32:33])
 		// >> partitions - nullable compact array length +1: 0 items (val: 1)
 		require.Equal(t, []byte{0x01}, respBuf[33:34])
+		// authorized operations
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[34:38])
 
 	})
 }

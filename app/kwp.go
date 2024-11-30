@@ -447,6 +447,11 @@ func (t topicResponse) WriteTo(w io.Writer) (int64, error) {
 	if _, err := partitions.WriteTo(bw); err != nil {
 		return int64(bw.Buffered()), fmt.Errorf("write partitions: %w", err)
 	}
+	// authorized operations
+	if err := binary.Write(w, binary.BigEndian, t.topicAuthorizedOperations); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write authorized operations: %w", err)
+	}
+
 	return int64(bw.Buffered()), nil
 }
 
@@ -481,6 +486,25 @@ func (d describeTopicPartitionsResponse) WriteTo(w io.Writer) (int64, error) {
 	}
 	return int64(bw.Buffered()), nil
 }
+
+const (
+	// READ (bit index 3 from the right)
+	aclOpRead = 1 << 3
+	// WRITE (bit index 4 from the right)
+	aclOpWrite = 1 << 4
+	// CREATE (bit index 5 from the right)
+	aclOpCreate = 1 << 5
+	// DELETE (bit index 6 from the right)
+	aclOpDelete = 1 << 6
+	// ALTER (bit index 7 from the right)
+	aclOpAlter = 1 << 7
+	// DESCRIBE (bit index 8 from the right)
+	aclOpDescribe = 1 << 8
+	// DESCRIBE_CONFIGS (bit index 10 from the right)
+	aclOpDescribeConfigs = 1 << 10
+	// ALTER_CONFIGS (bit index 11 from the right)
+	aclOpAlterConfigs = 1 << 11
+)
 
 // compactString contains a 32-bit unsigned varint representing the
 // string's length + 1, followed by the string bytes.
