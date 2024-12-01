@@ -43,10 +43,35 @@ func newApp() *app {
 	}
 }
 
+type version string
+
+const (
+	// v0 headers and v1 headers are nearly identical,
+	// the only difference is that v1 contains an additional tag_buffer field at the end.
+	headerVersion0 version = "v0"
+	headerVersion1 version = "v1"
+)
+
 type responseHeader struct {
+	version       version
 	correlationID int32
 	tagBuffer     taggedFields
 }
+
+func (h responseHeader) WriteTo(w io.Writer) (int64, error) {
+	if err := binary.Write(w, binary.BigEndian, h.correlationID); err != nil {
+		return 0, fmt.Errorf("write correlation ID: %w", err)
+	}
+	if h.version == headerVersion0 {
+		// Do not write tag buffer for v0
+		return 4, nil
+	}
+	if _, err := h.tagBuffer.WriteTo(w); err != nil {
+		return 0, fmt.Errorf("write tag buffer: %w", err)
+	}
+	return 0, nil
+}
+
 type response struct {
 	msgSize int32
 	header  responseHeader
@@ -70,15 +95,9 @@ func (r response) WriteTo(w io.Writer) (n int64, err error) {
 	// writing to w.
 	var buf bytes.Buffer
 
-	err = binary.Write(&buf, binary.BigEndian, r.header.correlationID)
+	_, err = r.header.WriteTo(&buf)
 	if err != nil {
 		return 0, fmt.Errorf("write header: %w", err)
-	}
-
-	// write tag buffer
-	_, err = r.header.tagBuffer.WriteTo(&buf)
-	if err != nil {
-		return 0, fmt.Errorf("write tag buffer: %w", err)
 	}
 
 	_, err = r.body.WriteTo(&buf)

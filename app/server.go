@@ -52,12 +52,15 @@ func (s *server) handle(conn net.Conn) {
 
 		resp := response{
 			header: responseHeader{
+				version:       headerVersion1,
 				correlationID: req.header.correlationID,
 			},
 			body: &bytes.Buffer{},
 		}
 		switch req.header.requestAPIKey {
 		case APIKeyApiVersions:
+			// downgrade to v0 header version
+			resp.header.version = headerVersion0
 			s.app.handleAPIVersionsRequest()(&resp, req)
 		case APIKeyDescribeTopicPartitions:
 			s.app.handleDescribeTopicPartitionsRequest()(&resp, req)

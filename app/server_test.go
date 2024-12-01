@@ -101,6 +101,79 @@ func TestServer(t *testing.T) {
 		require.Equal(t, []byte{0x0}, respBuf[18:19])
 	})
 
+	t.Run("'ApiVersions' request - kafka-cli", func(t *testing.T) {
+		request := []byte{
+			0x00, 0x00, 0x00, 0x23, // message size
+			0x00, 0x12,
+			0x00, 0x04, // v4
+			0x70, 0x05, 0x2a, 0x15, // correlation ID: 1879386645
+			// client software name
+			0x00,                                                 // tag buffer
+			0x09,                                                 // length
+			0x6b, 0x61, 0x66, 0x6b, 0x61, 0x2d, 0x63, 0x6c, 0x69, // kafka-cli
+			0x00, // tag buffer
+			// end header
+			// start body
+			// client ID
+			0x0a,                                                 // length
+			0x6b, 0x61, 0x66, 0x6b, 0x61, 0x2d, 0x63, 0x6c, 0x69, // kafka-cli
+
+			0x04,             // software version length
+			0x30, 0x2e, 0x31, // 0.1
+			0x00, // tag buffer
+		}
+
+		// wait for server to start
+		time.Sleep(20 * time.Millisecond)
+
+		client, err := net.Dial("tcp", "127.0.0.1:9092")
+		require.NoError(t, err)
+
+		defer func() {
+			_ = client.Close()
+		}()
+
+		nW, err := client.Write(request)
+		require.NoError(t, err)
+		require.Equal(t, len(request), nW)
+
+		// ApiVersions Response
+
+		expectedReqLen := int32(19)
+		var msgSize int32
+		err = binary.Read(client, binary.BigEndian, &msgSize)
+		require.NoError(t, err)
+
+		require.Equal(t, expectedReqLen, msgSize)
+
+		respBuf := make([]byte, msgSize) // skip 4 bytes from msgLen
+		_, err = io.ReadFull(client, respBuf)
+		require.NoError(t, err)
+
+		// Check all the fields
+		//  - .ResponseHeader
+		//  	- .correlation_id (1879386645)
+		require.Equal(t, []byte{0x70, 0x05, 0x2a, 0x15}, respBuf[0:4])
+		//  - .ResponseBody
+		//  	- .error_code (0)
+		require.Equal(t, []byte{0x0, 0x0}, respBuf[4:6])
+		//  	- .num_api_keys (1)
+		require.Equal(t, []byte{0x2}, respBuf[6:7])
+		//  	- .ApiKeys[0]
+		//  		- .api_key (18)
+		require.Equal(t, []byte{0x0, 0x12}, respBuf[7:9])
+		//  		- .min_version (4)
+		require.Equal(t, []byte{0x0, 0x3}, respBuf[9:11])
+		//  		- .max_version (4)
+		require.Equal(t, []byte{0x0, 0x4}, respBuf[11:13])
+		//  		- .TAG_BUFFER
+		require.Equal(t, []byte{0x0}, respBuf[13:14])
+		//  	- .throttle_time_ms (0)
+		require.Equal(t, []byte{0x0, 0x0, 0x0, 0x0}, respBuf[14:18])
+		//  	- .TAG_BUFFER
+		require.Equal(t, []byte{0x0}, respBuf[18:19])
+	})
+
 }
 
 func TestDescribeTopicPartitions(t *testing.T) {
