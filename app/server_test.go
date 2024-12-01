@@ -184,6 +184,12 @@ func TestDescribeTopicPartitions(t *testing.T) {
 		require.Equal(t, []byte{0x01}, respBuf[33:34])
 		// authorized operations
 		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[34:38])
+		// Tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[38:39])
+		// Next cursor
+		require.Equal(t, []byte{0xff}, respBuf[39:40])
+		// Tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[40:41])
 
 	})
 }

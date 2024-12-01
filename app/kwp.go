@@ -420,6 +420,7 @@ type topicResponse struct {
 	isInternal                bool
 	partitions                []partition
 	topicAuthorizedOperations int32
+	tagBuffer                 taggedFields
 }
 
 func (t topicResponse) WriteTo(w io.Writer) (int64, error) {
@@ -452,16 +453,32 @@ func (t topicResponse) WriteTo(w io.Writer) (int64, error) {
 		return int64(bw.Buffered()), fmt.Errorf("write authorized operations: %w", err)
 	}
 
+	if _, err := t.tagBuffer.WriteTo(bw); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write tag buffer: %w", err)
+	}
+
 	return int64(bw.Buffered()), nil
+}
+
+type cursor struct {
+	topicName      compactString
+	partitionIndex int32
+}
+
+func (c *cursor) WriteTo(w io.Writer) (int64, error) {
+	// TODO: Implement me
+	n, err := w.Write([]byte{0xff})
+	if err != nil {
+		return 0, fmt.Errorf("write null byte: %w", err)
+	}
+	return int64(n), nil
 }
 
 type describeTopicPartitionsResponse struct {
 	throttleTimeMS int32
 	topics         []topicResponse
-	nextCursor     struct {
-		topicName      compactString
-		partitionIndex int32
-	}
+	nextCursor     cursor
+	tagBuffer      taggedFields
 }
 
 func (d describeTopicPartitionsResponse) WriteTo(w io.Writer) (int64, error) {
@@ -481,6 +498,15 @@ func (d describeTopicPartitionsResponse) WriteTo(w io.Writer) (int64, error) {
 	if _, err = topics.WriteTo(bw); err != nil {
 		return int64(bw.Buffered()), fmt.Errorf("write topics: %w", err)
 	}
+
+	if _, err := d.nextCursor.WriteTo(bw); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write next cursor: %w", err)
+	}
+
+	if _, err := d.tagBuffer.WriteTo(bw); err != nil {
+		return int64(bw.Buffered()), fmt.Errorf("write tag buffer: %w", err)
+	}
+
 	if err := bw.Flush(); err != nil {
 		return int64(bw.Buffered()), fmt.Errorf("flushing buffer: %w", err)
 	}
