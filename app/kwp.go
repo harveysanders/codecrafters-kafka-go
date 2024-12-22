@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 
 	"github.com/google/uuid"
 )
@@ -314,6 +315,11 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 			},
 		}
 
+		err = app.getTopicMeta(dtpReq)
+		if err != nil {
+			log.Printf("getTopicsMeta: %v\n", err)
+		}
+
 		resp.body = respBody
 
 	}
@@ -322,6 +328,23 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 const (
 	ErrUnknownTopicOrPartition int16 = 3
 )
+
+func (a *app) getTopicMeta(req describeTopicPartitionsRequest) error {
+	logFilePath := "/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log"
+
+	f, err := os.Open(logFilePath)
+	if err != nil {
+		return fmt.Errorf("open __cluster_metadata : %w", err)
+	}
+	contents, err := io.ReadAll(f)
+	if err != nil {
+		return fmt.Errorf("read __cluster_metadata %w: ", err)
+	}
+
+	fmt.Println("contents")
+	fmt.Println(contents)
+	return nil
+}
 
 type topics []topic
 
@@ -343,9 +366,14 @@ func (t *topics) ReadFrom(r io.Reader) (int64, error) {
 	}
 	length -= 1
 	topics := make([]topic, 0, length)
+
 	for i := 0; i < int(length); i++ {
 		topic := topic{}
-		topic.ReadFrom(r)
+		nRead, err := topic.ReadFrom(r)
+		if err != nil {
+			return n, fmt.Errorf("reading topic %d: %w", i, err)
+		}
+		n += nRead
 		topics = append(topics, topic)
 	}
 	*t = topics
@@ -373,7 +401,11 @@ type topic struct {
 
 func (c *topic) ReadFrom(r io.Reader) (int64, error) {
 	*c = topic{}
-	return c.name.ReadFrom(r)
+	n, err := c.name.ReadFrom(r)
+	if err != nil {
+		return n, fmt.Errorf("read topic name: %w", err)
+	}
+	return n, nil
 }
 
 type describeTopicPartitionsRequest struct {
@@ -394,7 +426,7 @@ func (d *describeTopicPartitionsRequest) ReadFrom(r io.Reader) (int64, error) {
 type nullableString string
 
 func (ns *nullableString) ReadFrom(r io.Reader) (int64, error) {
-	var strLen uint16
+	var strLen int16
 	err := binary.Read(r, binary.BigEndian, &strLen)
 	if err != nil {
 		return 0, fmt.Errorf("read string length: %w", err)
