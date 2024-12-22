@@ -181,6 +181,7 @@ func TestDescribeTopicPartitions(t *testing.T) {
 		supportedAPIs: supportedAPIs{
 			APIKeyDescribeTopicPartitions: {},
 		},
+		metadataLogFilepath: "./test_data/__cluster_metadata.log",
 	}
 	srv := server{app}
 

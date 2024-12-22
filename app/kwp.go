@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 
 	"github.com/google/uuid"
 )
@@ -26,11 +25,22 @@ type supportedAPIs map[apiIndex]struct {
 	minVersion, maxVersion int16
 }
 type app struct {
-	supportedAPIs supportedAPIs
+	supportedAPIs       supportedAPIs // List of supported APIs.
+	metadataLogFilepath string        // Path to topic metadata log file.
+	metadataFile        io.Reader     // Topic metadata log contents.
 }
 
-func newApp() *app {
-	return &app{
+type option func(*app)
+
+// WithMetadataLogFilePath sets the path to the cluster's topic's log file.
+func WithMetadataLogFilePath(filepath string) func(a *app) {
+	return func(a *app) {
+		a.metadataLogFilepath = filepath
+	}
+}
+
+func newApp(opts ...option) *app {
+	app := &app{
 		supportedAPIs: supportedAPIs{
 			APIKeyApiVersions: {
 				minVersion: 3,
@@ -42,6 +52,10 @@ func newApp() *app {
 			},
 		},
 	}
+	for _, opt := range opts {
+		opt(app)
+	}
+	return app
 }
 
 type version string
@@ -330,13 +344,7 @@ const (
 )
 
 func (a *app) getTopicMeta(req describeTopicPartitionsRequest) error {
-	logFilePath := "/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log"
-
-	f, err := os.Open(logFilePath)
-	if err != nil {
-		return fmt.Errorf("open __cluster_metadata : %w", err)
-	}
-	contents, err := io.ReadAll(f)
+	contents, err := io.ReadAll(a.metadataFile)
 	if err != nil {
 		return fmt.Errorf("read __cluster_metadata %w: ", err)
 	}

@@ -20,6 +20,17 @@ func (s *server) ListenAndServe() error {
 		return fmt.Errorf("failed to bind to port 9092: %w", err)
 
 	}
+
+	// Load metadata file
+	f, err := os.Open(s.app.metadataLogFilepath)
+	if err != nil {
+		//  Dont' want to kill the server if the file doesn't exist.
+		// We'll return the error on the request.
+		log.Printf("open topics metadata log file: %v", err)
+	}
+	s.app.metadataFile = f
+
+	defer func() { _ = f.Close() }()
 	defer func() { _ = l.Close() }()
 
 	return s.Serve(l)
@@ -80,7 +91,9 @@ func (s *server) handle(conn net.Conn) {
 
 func main() {
 	srv := server{
-		app: newApp(),
+		app: newApp(
+			WithMetadataLogFilePath("/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log"),
+		),
 	}
 
 	if err := srv.ListenAndServe(); err != nil {
