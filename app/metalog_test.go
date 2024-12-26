@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"testing"
@@ -17,7 +18,7 @@ func TestReadRecordBatch(t *testing.T) {
 	}{
 		{
 			desc:  "bin spec test data",
-			input: bytes.NewReader(exampleRecordBatch()),
+			input: bytes.NewReader(exampleLogFile()),
 			want: RecordBatch{
 				offset:               0,
 				length:               79,
@@ -58,7 +59,65 @@ func TestReadRecordBatch(t *testing.T) {
 	}
 }
 
-func exampleRecordBatch() []byte {
+func TestLogFileIter(t *testing.T) {
+	wantBatches := []RecordBatch{
+		{
+			offset:               0,
+			length:               79,
+			partitionLeaderEpoch: 1,
+			magicByte:            2,
+			crc:                  -1335278212,
+			// attributes
+			lastOffsetDelta: 0,
+			baseTimeStamp:   mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
+			maxTimeStamp:    mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
+			producerID:      -1,
+			producerEpoch:   -1,
+			baseSequence:    -1,
+			recordsLength:   1,
+		},
+		{
+			offset:               1,
+			length:               228,
+			partitionLeaderEpoch: 1,
+			magicByte:            2,
+			crc:                  618336989,
+			// attributes
+			lastOffsetDelta: 2,
+			baseTimeStamp:   mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:37.397Z"),
+			maxTimeStamp:    mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:37.397Z"),
+			producerID:      -1,
+			producerEpoch:   -1,
+			baseSequence:    -1,
+			recordsLength:   3,
+		},
+	}
+
+	t.Run("iterates over the file, reading the batches, skipping the records", func(t *testing.T) {
+		logFile := LogFile{
+			rdr: *bufio.NewReader(bytes.NewReader(exampleLogFile())),
+		}
+		for i, got := range logFile.BatchRecords() {
+			want := wantBatches[i]
+			require.Equal(t, want.offset, got.offset)
+			require.Equal(t, want.length, got.length)
+			require.Equal(t, want.partitionLeaderEpoch, got.partitionLeaderEpoch)
+			require.Equal(t, want.magicByte, got.magicByte)
+			require.Equal(t, want.crc, got.crc)
+			require.Equal(t, want.lastOffsetDelta, got.lastOffsetDelta)
+			require.Equal(t, want.baseTimeStamp, got.baseTimeStamp)
+			require.Equal(t, want.maxTimeStamp, got.maxTimeStamp)
+			require.Equal(t, want.producerID, got.producerID)
+			require.Equal(t, want.producerEpoch, got.producerEpoch)
+			require.Equal(t, want.baseSequence, got.baseSequence)
+			require.Equal(t, want.recordsLength, got.recordsLength)
+		}
+
+		require.NoError(t, logFile.Err())
+	})
+}
+
+func exampleLogFile() []byte {
 	return []byte{
 		// RecordBatch[0]
 		// Base Offset (8 bytes, 0x00 in hex, 0 in decimal)
