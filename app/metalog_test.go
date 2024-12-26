@@ -97,7 +97,13 @@ func TestLogFileIter(t *testing.T) {
 		logFile := LogFile{
 			rdr: *bufio.NewReader(bytes.NewReader(exampleLogFile())),
 		}
-		for i, got := range logFile.BatchRecords() {
+
+		// Support iterators in 1.22
+		var yield = func(i int, got RecordBatch) bool {
+			if i > 1 {
+				return false
+			}
+
 			want := wantBatches[i]
 			require.Equal(t, want.offset, got.offset)
 			require.Equal(t, want.length, got.length)
@@ -111,9 +117,16 @@ func TestLogFileIter(t *testing.T) {
 			require.Equal(t, want.producerEpoch, got.producerEpoch)
 			require.Equal(t, want.baseSequence, got.baseSequence)
 			require.Equal(t, want.recordsLength, got.recordsLength)
+			return true
 		}
 
-		require.NoError(t, logFile.Err())
+		// Support iterators in 1.22
+		iterator := logFile.BatchRecords()
+		for i := 0; i < 2; i++ {
+			iterator(yield)
+			require.NoError(t, logFile.Err())
+		}
+
 	})
 }
 

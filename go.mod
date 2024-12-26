@@ -8,7 +8,7 @@
 
 module github.com/codecrafters-io/kafka-starter-go
 
-go 1.23
+go 1.22
 
 require github.com/stretchr/testify v1.10.0
 
