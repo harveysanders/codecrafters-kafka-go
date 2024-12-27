@@ -1,12 +1,12 @@
-package main
+package metadata_test
 
 import (
-	"bufio"
 	"bytes"
 	"io"
 	"testing"
 	"time"
 
+	"github.com/codecrafters-io/kafka-starter-go/app/metadata"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,109 +14,107 @@ func TestReadRecordBatch(t *testing.T) {
 	testCases := []struct {
 		desc  string
 		input io.Reader
-		want  RecordBatch
+		want  metadata.RecordBatch
 	}{
 		{
 			desc:  "bin spec test data",
 			input: bytes.NewReader(exampleLogFile()),
-			want: RecordBatch{
-				offset:               0,
-				length:               79,
-				partitionLeaderEpoch: 1,
-				magicByte:            2,
-				crc:                  -1335278212,
+			want: metadata.RecordBatch{
+				Offset:               0,
+				Length:               79,
+				PartitionLeaderEpoch: 1,
+				MagicByte:            2,
+				CRC:                  -1335278212,
 				// attributes
-				lastOffsetDelta: 0,
-				baseTimeStamp:   mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
-				maxTimeStamp:    mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
-				producerID:      -1,
-				producerEpoch:   -1,
-				baseSequence:    -1,
-				recordsLength:   1,
+				LastOffsetDelta: 0,
+				BaseTimeStamp:   mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
+				MaxTimeStamp:    mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
+				ProducerID:      -1,
+				ProducerEpoch:   -1,
+				BaseSequence:    -1,
+				RecordsLength:   1,
 			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			got := RecordBatch{}
+			got := metadata.RecordBatch{}
 			_, err := got.ReadFrom(tc.input)
 			require.NoError(t, err)
 
-			require.Equal(t, tc.want.offset, got.offset)
-			require.Equal(t, tc.want.length, got.length)
-			require.Equal(t, tc.want.partitionLeaderEpoch, got.partitionLeaderEpoch)
-			require.Equal(t, tc.want.magicByte, got.magicByte)
-			require.Equal(t, tc.want.crc, got.crc)
-			require.Equal(t, tc.want.lastOffsetDelta, got.lastOffsetDelta)
-			require.Equal(t, tc.want.baseTimeStamp, got.baseTimeStamp)
-			require.Equal(t, tc.want.maxTimeStamp, got.maxTimeStamp)
-			require.Equal(t, tc.want.producerID, got.producerID)
-			require.Equal(t, tc.want.producerEpoch, got.producerEpoch)
-			require.Equal(t, tc.want.baseSequence, got.baseSequence)
-			require.Equal(t, tc.want.recordsLength, got.recordsLength)
+			require.Equal(t, tc.want.Offset, got.Offset)
+			require.Equal(t, tc.want.LastOffsetDelta, got.LastOffsetDelta)
+			require.Equal(t, tc.want.PartitionLeaderEpoch, got.PartitionLeaderEpoch)
+			require.Equal(t, tc.want.MagicByte, got.MagicByte)
+			require.Equal(t, tc.want.CRC, got.CRC)
+			require.Equal(t, tc.want.LastOffsetDelta, got.LastOffsetDelta)
+			require.Equal(t, tc.want.BaseTimeStamp, got.BaseTimeStamp)
+			require.Equal(t, tc.want.MaxTimeStamp, got.MaxTimeStamp)
+			require.Equal(t, tc.want.ProducerID, got.ProducerID)
+			require.Equal(t, tc.want.ProducerEpoch, got.ProducerEpoch)
+			require.Equal(t, tc.want.BaseSequence, got.BaseSequence)
+			require.Equal(t, tc.want.RecordsLength, got.RecordsLength)
 		})
 	}
 }
 
 func TestLogFileIter(t *testing.T) {
-	wantBatches := []RecordBatch{
+	wantBatches := []metadata.RecordBatch{
 		{
-			offset:               0,
-			length:               79,
-			partitionLeaderEpoch: 1,
-			magicByte:            2,
-			crc:                  -1335278212,
+			Offset:               0,
+			Length:               79,
+			PartitionLeaderEpoch: 1,
+			MagicByte:            2,
+			CRC:                  -1335278212,
 			// attributes
-			lastOffsetDelta: 0,
-			baseTimeStamp:   mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
-			maxTimeStamp:    mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
-			producerID:      -1,
-			producerEpoch:   -1,
-			baseSequence:    -1,
-			recordsLength:   1,
+			LastOffsetDelta: 0,
+			BaseTimeStamp:   mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
+			MaxTimeStamp:    mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:23.832Z"),
+			ProducerID:      -1,
+			ProducerEpoch:   -1,
+			BaseSequence:    -1,
+			RecordsLength:   1,
 		},
 		{
-			offset:               1,
-			length:               228,
-			partitionLeaderEpoch: 1,
-			magicByte:            2,
-			crc:                  618336989,
+			Offset:               1,
+			Length:               228,
+			PartitionLeaderEpoch: 1,
+			MagicByte:            2,
+			CRC:                  618336989,
 			// attributes
-			lastOffsetDelta: 2,
-			baseTimeStamp:   mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:37.397Z"),
-			maxTimeStamp:    mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:37.397Z"),
-			producerID:      -1,
-			producerEpoch:   -1,
-			baseSequence:    -1,
-			recordsLength:   3,
+			LastOffsetDelta: 2,
+			BaseTimeStamp:   mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:37.397Z"),
+			MaxTimeStamp:    mustParse(t, time.RFC3339Nano, "2024-09-11T09:12:37.397Z"),
+			ProducerID:      -1,
+			ProducerEpoch:   -1,
+			BaseSequence:    -1,
+			RecordsLength:   3,
 		},
 	}
 
 	t.Run("iterates over the file, reading the batches, skipping the records", func(t *testing.T) {
-		logFile := LogFile{
-			rdr: *bufio.NewReader(bytes.NewReader(exampleLogFile())),
-		}
+		logFile := metadata.NewLogFile(bytes.NewReader(exampleLogFile()))
 
 		// Support iterators in 1.22
-		var yield = func(i int, got RecordBatch) bool {
+		var yield = func(i int, got metadata.RecordBatch) bool {
 			if i > 1 {
 				return false
 			}
 
 			want := wantBatches[i]
-			require.Equal(t, want.offset, got.offset)
-			require.Equal(t, want.length, got.length)
-			require.Equal(t, want.partitionLeaderEpoch, got.partitionLeaderEpoch)
-			require.Equal(t, want.magicByte, got.magicByte)
-			require.Equal(t, want.crc, got.crc)
-			require.Equal(t, want.lastOffsetDelta, got.lastOffsetDelta)
-			require.Equal(t, want.baseTimeStamp, got.baseTimeStamp)
-			require.Equal(t, want.maxTimeStamp, got.maxTimeStamp)
-			require.Equal(t, want.producerID, got.producerID)
-			require.Equal(t, want.producerEpoch, got.producerEpoch)
-			require.Equal(t, want.baseSequence, got.baseSequence)
-			require.Equal(t, want.recordsLength, got.recordsLength)
+			require.Equal(t, want.Offset, got.Offset)
+			require.Equal(t, want.LastOffsetDelta, got.LastOffsetDelta)
+			require.Equal(t, want.PartitionLeaderEpoch, got.PartitionLeaderEpoch)
+			require.Equal(t, want.MagicByte, got.MagicByte)
+			require.Equal(t, want.CRC, got.CRC)
+			require.Equal(t, want.LastOffsetDelta, got.LastOffsetDelta)
+			require.Equal(t, want.BaseTimeStamp, got.BaseTimeStamp)
+			require.Equal(t, want.MaxTimeStamp, got.MaxTimeStamp)
+			require.Equal(t, want.ProducerID, got.ProducerID)
+			require.Equal(t, want.ProducerEpoch, got.ProducerEpoch)
+			require.Equal(t, want.BaseSequence, got.BaseSequence)
+			require.Equal(t, want.RecordsLength, got.RecordsLength)
 			return true
 		}
 
@@ -406,6 +404,7 @@ func exampleLogFile() []byte {
 
 func mustParse(t *testing.T, layout string, v string) time.Time {
 	t.Helper()
+
 	res, err := time.Parse(layout, v)
 	require.NoError(t, err)
 	return res
