@@ -5,49 +5,52 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"iter"
 	"time"
 )
 
 type LogFile struct {
-	rdr bufio.Reader
-	err error
+	rdr        bufio.Reader // Reader to read the underlying log file.
+	err        error        // The current error, if any.
+	curBatch   RecordBatch  // The current batch pulled from the log file.
+	nextOffset int          // nextOffset is the byte offset to the next record batch on the reader.
 }
 
+// NewLogFile returns a new [LogFile] that reads record batches from r.
 func NewLogFile(r io.Reader) *LogFile {
 	return &LogFile{rdr: *bufio.NewReader(r)}
 }
 
-// BatchRecords returns an iterator over the batches in the metadata log file.
-// It returns a single-use iterator.
-func (l *LogFile) BatchRecords() iter.Seq2[int, RecordBatch] {
-	return func(yield func(int, RecordBatch) bool) {
-		rb := RecordBatch{}
+// Batch returns the most recent record batch read from the log file.
+func (l *LogFile) Batch() (int, RecordBatch) {
+	return int(l.curBatch.Offset), l.curBatch
+}
 
-		n, err := rb.ReadFrom(&l.rdr)
-		if err != nil {
-			l.err = fmt.Errorf("read record batch: %w", err)
-			return
-		}
-
-		if !yield(int(rb.Offset), rb) {
-			// Cleanup
-			return
-		}
-
-		// read off the diff from current head and full batch length
-		// before moving to the next batch
-		toRead := int64(rb.Length) - n
-		nDiscarded, err := l.rdr.Discard(int(toRead))
-		if err != nil {
-			l.err = fmt.Errorf("discard bytes before next batch: %w", err)
-			return
-		}
-		if toRead != int64(nDiscarded) {
-			l.err = fmt.Errorf("expected to discard %d bytes, but actually discarded %d", toRead, nDiscarded)
-			return
-		}
+// Next advances to the next record batch in the log file. If there is an error reading the next batch, Next() returns false, and [LogFile].Err() will be non-nil.
+func (l *LogFile) Next() bool {
+	// read off the diff from current head and full batch length
+	// before moving to the next batch...aka janky Seek()
+	nDiscarded, err := l.rdr.Discard(int(l.nextOffset))
+	if err != nil {
+		l.err = fmt.Errorf("discard bytes before next batch: %w", err)
+		return false
 	}
+	if l.nextOffset != nDiscarded {
+		l.err = fmt.Errorf("expected to discard %d bytes, but actually discarded %d", l.nextOffset, nDiscarded)
+		return false
+	}
+
+	rb := RecordBatch{}
+
+	n, err := rb.ReadFrom(&l.rdr)
+	if err != nil {
+		l.err = fmt.Errorf("read record batch: %w", err)
+		return false
+	}
+
+	l.curBatch = rb
+
+	l.nextOffset = int(int64(rb.Length) - n)
+	return rb.Offset < int64(rb.LastOffsetDelta)
 }
 
 func (l *LogFile) Err() error {

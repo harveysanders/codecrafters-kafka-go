@@ -96,12 +96,8 @@ func TestLogFileIter(t *testing.T) {
 	t.Run("iterates over the file, reading the batches, skipping the records", func(t *testing.T) {
 		logFile := metadata.NewLogFile(bytes.NewReader(exampleLogFile()))
 
-		// Support iterators in 1.22
-		var yield = func(i int, got metadata.RecordBatch) bool {
-			if i > 1 {
-				return false
-			}
-
+		for logFile.Next() {
+			i, got := logFile.Batch()
 			want := wantBatches[i]
 			require.Equal(t, want.Offset, got.Offset)
 			require.Equal(t, want.LastOffsetDelta, got.LastOffsetDelta)
@@ -115,16 +111,9 @@ func TestLogFileIter(t *testing.T) {
 			require.Equal(t, want.ProducerEpoch, got.ProducerEpoch)
 			require.Equal(t, want.BaseSequence, got.BaseSequence)
 			require.Equal(t, want.RecordsLength, got.RecordsLength)
-			return true
 		}
 
-		// Support iterators in 1.22
-		iterator := logFile.BatchRecords()
-		for i := 0; i < 2; i++ {
-			iterator(yield)
-			require.NoError(t, logFile.Err())
-		}
-
+		require.NoError(t, logFile.Err())
 	})
 }
 
