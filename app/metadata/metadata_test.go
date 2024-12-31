@@ -2,6 +2,7 @@ package metadata_test
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -120,6 +121,7 @@ func TestLogFileIter(t *testing.T) {
 func TestReadRecords(t *testing.T) {
 	wantBatches := []metadata.RecordBatch{
 		{
+			// first record @ byte 61
 			Records: []metadata.Record{
 				{
 					Length: 29,
@@ -128,6 +130,7 @@ func TestReadRecords(t *testing.T) {
 			},
 		},
 		{
+			// should @ byte 91
 			Records: []metadata.Record{
 				{
 					Length: 30,
@@ -154,6 +157,8 @@ func TestReadRecords(t *testing.T) {
 			gotRecord := batch.Cur()
 			wantRecord := wantBatches[i].Records[j]
 			require.Equal(t, wantRecord.Length, gotRecord.Length)
+			fmt.Printf("i: %d, j: %d, len: %d\n", i, j, wantRecord.Length)
+			// require.Equal(t, wantRecord.Type, gotRecord.Type)
 		}
 		require.NoError(t, batch.Err())
 	}

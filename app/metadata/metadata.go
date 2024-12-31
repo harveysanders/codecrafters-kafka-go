@@ -19,7 +19,10 @@ type LogFile struct {
 
 // NewLogFile returns a new [LogFile] that reads record batches from r.
 func NewLogFile(r io.Reader) *LogFile {
-	return &LogFile{rdr: *bufio.NewReader(r)}
+	return &LogFile{
+		hasNext: true,
+		rdr:     *bufio.NewReader(r),
+	}
 }
 
 // Batch returns the most recent record batch read from the log file.
@@ -55,8 +58,18 @@ func (l *LogFile) Next() bool {
 	l.curBatch = rb
 
 	l.nextOffset = int(int64(rb.Length) - n)
-	l.hasNext = rb.Offset < int64(rb.LastOffsetDelta)
-	return l.hasNext
+	_, err = l.rdr.Peek(l.nextOffset + 1)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			l.hasNext = false
+			return true
+		}
+		l.err = fmt.Errorf("peek next batch: %w", err)
+		l.hasNext = false
+		return true
+	}
+
+	return true
 }
 
 func (l *LogFile) Err() error {
@@ -116,6 +129,7 @@ func (rb *RecordBatch) ReadFrom(r io.Reader) (int64, error) {
 		return int64(n), fmt.Errorf("read header: %w", err)
 	}
 	nRead := int64(len(header))
+	rb.hasNext = true
 	rb.Offset = int64(binary.BigEndian.Uint64(header[0:8]))
 	rb.Length = int32(binary.BigEndian.Uint32(header[8:12]))
 	rb.PartitionLeaderEpoch = int32(binary.BigEndian.Uint32(header[12:16]))
@@ -152,8 +166,8 @@ func (rb *RecordBatch) NextRecord() bool {
 	rb.err = nil
 	rb.curRecord = &record
 
-	rb.hasNext = record.OffsetDelta < int64(rb.RecordsLength)
-	return rb.hasNext
+	rb.hasNext = record.OffsetDelta < int64(rb.RecordsLength)-1
+	return true
 }
 
 func (rb *RecordBatch) Cur() *Record {
