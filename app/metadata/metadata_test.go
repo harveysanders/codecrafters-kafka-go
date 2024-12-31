@@ -118,20 +118,41 @@ func TestLogFileIter(t *testing.T) {
 }
 
 func TestReadRecords(t *testing.T) {
-	wantRecords := []metadata.Record{
-		// TODO: Add the rest of the test records/data
+	wantBatches := []metadata.RecordBatch{
 		{
-			Length: 29,
+			Records: []metadata.Record{
+				{
+					Length: 29,
+					Type:   metadata.TypeFeatureLevel,
+				},
+			},
+		},
+		{
+			Records: []metadata.Record{
+				{
+					Length: 30,
+					Type:   metadata.TypeTopic,
+				},
+				{
+					Length: 72,
+					Type:   metadata.TypePartition,
+				},
+				{
+					Length: 72,
+					Type:   metadata.TypePartition,
+				},
+			},
 		},
 	}
+
 	logFile := metadata.NewLogFile(bytes.NewReader(exampleLogFile()))
 
 	for logFile.Next() {
-		_, batch := logFile.Batch()
-		var i int
+		i, batch := logFile.Batch()
+		var j int
 		for batch.NextRecord() {
 			gotRecord := batch.Cur()
-			wantRecord := wantRecords[i]
+			wantRecord := wantBatches[i].Records[j]
 			require.Equal(t, wantRecord.Length, gotRecord.Length)
 		}
 		require.NoError(t, batch.Err())

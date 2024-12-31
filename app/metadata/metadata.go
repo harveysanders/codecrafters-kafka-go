@@ -106,6 +106,7 @@ type RecordBatch struct {
 	ProducerEpoch   int16     // Producer Epoch is a 2-byte big-endian integer indicating the epoch of the producer that produced the records in this batch.
 	BaseSequence    int32     // Base Sequence is a 4-byte big-endian integer indicating the sequence number of the first record in a batch. It is used to ensure the correct ordering and deduplication of messages produced by a Kafka producer.
 	RecordsLength   int32     // Records Length is a 4-byte big-endian integer indicating the number of records in this batch.
+	Records         []Record
 }
 
 func (rb *RecordBatch) ReadFrom(r io.Reader) (int64, error) {
@@ -166,20 +167,22 @@ func (rb *RecordBatch) Err() error {
 type RecordType int
 
 const (
-	TypeTopic     RecordType = 0x02
-	TypePartition RecordType = 0x03
+	TypeTopic        RecordType = 0x02
+	TypePartition    RecordType = 0x03
+	TypeFeatureLevel RecordType = 0x0c
 )
 
 type Record struct {
-	Length            int64  // Length is a signed variable size integer indicating the length of the record, the length is calculated from the attributes field to the end of the record.
-	Attributes        int8   // Attributes is a 1-byte big-endian integer indicating the attributes of the record. Currently, this field is unused in the protocol.
-	TimestampDelta    int64  // Timestamp Delta is a signed variable size integer indicating the difference between the timestamp of the record and the base timestamp of the record batch.
-	OffsetDelta       int64  // Offset Delta is a signed variable size integer indicating the difference between the offset of the record and the base offset of the record batch.
-	KeyLength         int64  // Key Length is a signed variable size integer indicating the length of the key of the record.
-	Key               []byte // Key is a byte array indicating the key of the record.
-	ValueLength       int64  // Value Length is a signed variable size integer indicating the length of the value of the record.
-	Value             []byte // Value is a byte array indicating the value of the record.
-	HeadersArrayCount uint   // Header array count is an unsigned variable size integer indicating the number of headers present.
+	Length            int64      // Length is a signed variable size integer indicating the length of the record, the length is calculated from the attributes field to the end of the record.
+	Attributes        int8       // Attributes is a 1-byte big-endian integer indicating the attributes of the record. Currently, this field is unused in the protocol.
+	TimestampDelta    int64      // Timestamp Delta is a signed variable size integer indicating the difference between the timestamp of the record and the base timestamp of the record batch.
+	OffsetDelta       int64      // Offset Delta is a signed variable size integer indicating the difference between the offset of the record and the base offset of the record batch.
+	Type              RecordType // Value type for the record.
+	KeyLength         int64      // Key Length is a signed variable size integer indicating the length of the key of the record.
+	Key               []byte     // Key is a byte array indicating the key of the record.
+	ValueLength       int64      // Value Length is a signed variable size integer indicating the length of the value of the record.
+	Value             []byte     // Value is a byte array indicating the value of the record.
+	HeadersArrayCount uint       // Header array count is an unsigned variable size integer indicating the number of headers present.
 }
 
 func (rec *Record) ReadFrom(r io.Reader) (int64, error) {
