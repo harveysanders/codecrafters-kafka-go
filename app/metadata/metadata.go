@@ -3,6 +3,7 @@ package metadata
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -12,6 +13,7 @@ type LogFile struct {
 	rdr        bufio.Reader // Reader to read the underlying log file.
 	err        error        // The current error, if any.
 	curBatch   RecordBatch  // The current batch pulled from the log file.
+	hasNext    bool         // If there is another batch in the file.
 	nextOffset int          // nextOffset is the byte offset to the next record batch on the reader.
 }
 
@@ -27,6 +29,9 @@ func (l *LogFile) Batch() (int, RecordBatch) {
 
 // Next advances to the next record batch in the log file. If there is an error reading the next batch, Next() returns false, and [LogFile].Err() will be non-nil.
 func (l *LogFile) Next() bool {
+	if !l.hasNext {
+		return false
+	}
 	// read off the diff from current head and full batch length
 	// before moving to the next batch...aka janky Seek()
 	nDiscarded, err := l.rdr.Discard(int(l.nextOffset))
@@ -39,7 +44,7 @@ func (l *LogFile) Next() bool {
 		return false
 	}
 
-	rb := RecordBatch{}
+	rb := RecordBatch{file: l}
 
 	n, err := rb.ReadFrom(&l.rdr)
 	if err != nil {
@@ -50,7 +55,8 @@ func (l *LogFile) Next() bool {
 	l.curBatch = rb
 
 	l.nextOffset = int(int64(rb.Length) - n)
-	return rb.Offset < int64(rb.LastOffsetDelta)
+	l.hasNext = rb.Offset < int64(rb.LastOffsetDelta)
+	return l.hasNext
 }
 
 func (l *LogFile) Err() error {
@@ -59,6 +65,11 @@ func (l *LogFile) Err() error {
 
 // RecordBatch represents the on-disk format that Kafka uses to store multiple records.
 type RecordBatch struct {
+	file      *LogFile // Reference to containing log file.
+	err       error    // Error from reading the record from the record batch's log file.
+	curRecord *Record  // The last read record from the batch
+	hasNext   bool     // Whether or not there is another record in the batch.
+
 	Offset               int64 // Indicates the offset of the first record in this batch. Ex `0` is the first record, `1` the 2nd...
 	Length               int32 // Length of the entire record batch in bytes.
 	PartitionLeaderEpoch int32 // Indicates the epoch of the leader for this partition. It is a monotonically increasing number that is incremented by 1 whenever the partition leader changes. This value is used to detect out of order writes.
@@ -97,8 +108,6 @@ type RecordBatch struct {
 	RecordsLength   int32     // Records Length is a 4-byte big-endian integer indicating the number of records in this batch.
 }
 
-type Record struct{}
-
 func (rb *RecordBatch) ReadFrom(r io.Reader) (int64, error) {
 	header := make([]byte, 61)
 	n, err := io.ReadFull(r, header)
@@ -126,4 +135,111 @@ func (rb *RecordBatch) ReadFrom(r io.Reader) (int64, error) {
 	rb.RecordsLength = int32(binary.BigEndian.Uint32(header[57:61]))
 
 	return nRead, nil
+}
+
+func (rb *RecordBatch) NextRecord() bool {
+	if !rb.hasNext {
+		return false
+	}
+
+	record := Record{}
+	_, err := record.ReadFrom(&rb.file.rdr)
+	if err != nil {
+		rb.err = err
+		return false
+	}
+	rb.err = nil
+	rb.curRecord = &record
+
+	rb.hasNext = record.OffsetDelta < int64(rb.RecordsLength)
+	return rb.hasNext
+}
+
+func (rb *RecordBatch) Cur() *Record {
+	return rb.curRecord
+}
+
+func (rb *RecordBatch) Err() error {
+	return rb.err
+}
+
+type RecordType int
+
+const (
+	TypeTopic     RecordType = 0x02
+	TypePartition RecordType = 0x03
+)
+
+type Record struct {
+	Length            int64  // Length is a signed variable size integer indicating the length of the record, the length is calculated from the attributes field to the end of the record.
+	Attributes        int8   // Attributes is a 1-byte big-endian integer indicating the attributes of the record. Currently, this field is unused in the protocol.
+	TimestampDelta    int64  // Timestamp Delta is a signed variable size integer indicating the difference between the timestamp of the record and the base timestamp of the record batch.
+	OffsetDelta       int64  // Offset Delta is a signed variable size integer indicating the difference between the offset of the record and the base offset of the record batch.
+	KeyLength         int64  // Key Length is a signed variable size integer indicating the length of the key of the record.
+	Key               []byte // Key is a byte array indicating the key of the record.
+	ValueLength       int64  // Value Length is a signed variable size integer indicating the length of the value of the record.
+	Value             []byte // Value is a byte array indicating the value of the record.
+	HeadersArrayCount uint   // Header array count is an unsigned variable size integer indicating the number of headers present.
+}
+
+func (rec *Record) ReadFrom(r io.Reader) (int64, error) {
+	var err error
+	var nRead int
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReader(r)
+	}
+
+	length, n, err := readVarInt(br)
+	nRead += n
+	if err != nil {
+		return int64(nRead), fmt.Errorf("read length: %w", err)
+	}
+
+	rec.Length = length
+	buf := make([]byte, rec.Length)
+
+	n, err = br.Read(buf)
+	nRead += n
+	if err != nil {
+		return int64(nRead), fmt.Errorf("read record: %w", err)
+	}
+
+	var cursor int
+	rec.Attributes = int8(buf[cursor])
+	rec.TimestampDelta, n = binary.Varint(buf[1:])
+	if err := checkN(n); err != nil {
+		return int64(nRead), fmt.Errorf("read timestamp delta %w", err)
+	}
+	return int64(nRead), nil
+}
+
+func readVarInt(r *bufio.Reader) (val int64, n int, err error) {
+	buf, err := r.Peek(binary.MaxVarintLen64)
+	if err != nil {
+		return 0, 0, err
+	}
+	val, n = binary.Varint(buf)
+	if err := checkN(n); err != nil {
+		return val, n, fmt.Errorf("read varint: %w", err)
+	}
+	// Read off how ever many bytes were needed for the variable int
+	discarded, err := r.Discard(n)
+	if err != nil {
+		return val, n, fmt.Errorf("discard: %w", err)
+	}
+	if discarded != n {
+		return val, n, fmt.Errorf("expected to discard %d bytes, but only dropped %d", n, discarded)
+	}
+	return val, n, nil
+}
+
+func checkN(n int) error {
+	if n == 0 {
+		return io.ErrUnexpectedEOF
+	}
+	if n < 0 {
+		return errors.New("overflow")
+	}
+	return nil
 }

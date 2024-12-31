@@ -117,6 +117,28 @@ func TestLogFileIter(t *testing.T) {
 	})
 }
 
+func TestReadRecords(t *testing.T) {
+	wantRecords := []metadata.Record{
+		// TODO: Add the rest of the test records/data
+		{
+			Length: 29,
+		},
+	}
+	logFile := metadata.NewLogFile(bytes.NewReader(exampleLogFile()))
+
+	for logFile.Next() {
+		_, batch := logFile.Batch()
+		var i int
+		for batch.NextRecord() {
+			gotRecord := batch.Cur()
+			wantRecord := wantRecords[i]
+			require.Equal(t, wantRecord.Length, gotRecord.Length)
+		}
+		require.NoError(t, batch.Err())
+	}
+	require.NoError(t, logFile.Err())
+}
+
 func exampleLogFile() []byte {
 	return []byte{
 		// RecordBatch[0]
