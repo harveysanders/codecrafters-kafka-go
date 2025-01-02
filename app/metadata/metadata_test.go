@@ -152,9 +152,7 @@ func TestReadRecords(t *testing.T) {
 
 	for logFile.Next() {
 		i, batch := logFile.Batch()
-		var j int
-		for batch.NextRecord() {
-			gotRecord := batch.Cur()
+		for j, gotRecord := range batch.Records {
 			wantRecord := wantBatches[i].Records[j]
 			require.Equal(t, wantRecord.Length, gotRecord.Length)
 			fmt.Printf("i: %d, j: %d, len: %d\n", i, j, wantRecord.Length)

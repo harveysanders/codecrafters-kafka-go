@@ -10,19 +10,14 @@ import (
 )
 
 type LogFile struct {
-	rdr        bufio.Reader // Reader to read the underlying log file.
-	err        error        // The current error, if any.
-	curBatch   RecordBatch  // The current batch pulled from the log file.
-	hasNext    bool         // If there is another batch in the file.
-	nextOffset int          // nextOffset is the byte offset to the next record batch on the reader.
+	rdr      bufio.Reader // Reader to read the underlying log file.
+	err      error        // The current error, if any.
+	curBatch RecordBatch  // The current batch pulled from the log file.
 }
 
 // NewLogFile returns a new [LogFile] that reads record batches from r.
 func NewLogFile(r io.Reader) *LogFile {
-	return &LogFile{
-		hasNext: true,
-		rdr:     *bufio.NewReader(r),
-	}
+	return &LogFile{rdr: *bufio.NewReader(r)}
 }
 
 // Batch returns the most recent record batch read from the log file.
@@ -32,43 +27,16 @@ func (l *LogFile) Batch() (int, RecordBatch) {
 
 // Next advances to the next record batch in the log file. If there is an error reading the next batch, Next() returns false, and [LogFile].Err() will be non-nil.
 func (l *LogFile) Next() bool {
-	if !l.hasNext {
-		return false
-	}
-	// read off the diff from current head and full batch length
-	// before moving to the next batch...aka janky Seek()
-	nDiscarded, err := l.rdr.Discard(int(l.nextOffset))
-	if err != nil {
-		l.err = fmt.Errorf("discard bytes before next batch: %w", err)
-		return false
-	}
-	if l.nextOffset != nDiscarded {
-		l.err = fmt.Errorf("expected to discard %d bytes, but actually discarded %d", l.nextOffset, nDiscarded)
-		return false
-	}
-
 	rb := RecordBatch{file: l}
-
-	n, err := rb.ReadFrom(&l.rdr)
+	_, err := rb.ReadFrom(&l.rdr)
 	if err != nil {
-		l.err = fmt.Errorf("read record batch: %w", err)
+		if !errors.Is(err, io.EOF) {
+			l.err = fmt.Errorf("read record batch: %w", err)
+		}
 		return false
 	}
 
 	l.curBatch = rb
-
-	l.nextOffset = int(int64(rb.Length) - n)
-	_, err = l.rdr.Peek(l.nextOffset + 1)
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			l.hasNext = false
-			return true
-		}
-		l.err = fmt.Errorf("peek next batch: %w", err)
-		l.hasNext = false
-		return true
-	}
-
 	return true
 }
 
@@ -149,6 +117,15 @@ func (rb *RecordBatch) ReadFrom(r io.Reader) (int64, error) {
 	rb.BaseSequence = int32(binary.BigEndian.Uint32(header[53:57]))
 	rb.RecordsLength = int32(binary.BigEndian.Uint32(header[57:61]))
 
+	rb.Records = make([]Record, rb.RecordsLength)
+	for i, rec := range rb.Records {
+		n, err := rec.ReadFrom(r)
+		nRead += n
+		if err != nil {
+			return nRead, fmt.Errorf("read record :%w", err)
+		}
+		rb.Records[i] = rec
+	}
 	return nRead, nil
 }
 
