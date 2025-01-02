@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 
+	"github.com/codecrafters-io/kafka-starter-go/app/metadata"
 	"github.com/google/uuid"
 )
 
@@ -25,17 +27,21 @@ type supportedAPIs map[apiIndex]struct {
 	minVersion, maxVersion int16
 }
 type app struct {
-	supportedAPIs       supportedAPIs // List of supported APIs.
-	metadataLogFilepath string        // Path to topic metadata log file.
-	metadataFile        io.Reader     // Topic metadata log contents.
+	supportedAPIs supportedAPIs     // List of supported APIs.
+	metadataFile  io.Reader         // Topic metadata log contents.
+	metadataSrv   *metadata.Service // Cluster topic metadata service.
 }
 
 type option func(*app)
 
-// WithMetadataLogFilePath sets the path to the cluster's topic's log file.
-func WithMetadataLogFilePath(filepath string) func(a *app) {
+// WithMetadataLogFile sets and loads the cluster's topic's log file.
+func WithMetadataLogFile(r io.Reader) func(a *app) {
 	return func(a *app) {
-		a.metadataLogFilepath = filepath
+		a.metadataSrv = &metadata.Service{}
+		if err := a.metadataSrv.Load(r); err != nil {
+			panic(fmt.Sprintf("load metadata %v", err))
+		}
+		a.metadataFile = r
 	}
 }
 
@@ -51,7 +57,9 @@ func newApp(opts ...option) *app {
 				maxVersion: 0,
 			},
 		},
+		metadataSrv: &metadata.Service{},
 	}
+
 	for _, opt := range opts {
 		opt(app)
 	}
@@ -318,24 +326,33 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 			return
 		}
 
+		// Look up topic (only one for now)
+		meta, err := app.findTopicMeta(string(dtpReq.topics[0].name))
+		if err != nil {
+			log.Printf("Error finding topic metadata: %v\n", err)
+			if !errors.Is(err, metadata.ErrNotFound) {
+				// TODO: Error response
+				return
+			}
+		}
+
+		partitions := make([]partition, 0, len(meta.Partitions))
+		for _, v := range meta.Partitions {
+			partitions = append(partitions, partition{
+				partitionIndex: v.Index,
+			})
+		}
 		respBody := describeTopicPartitionsResponse{
 			topics: []topicResponse{
 				{
-					errorCode:  ErrUnknownTopicOrPartition,
-					topicID:    uuid.Nil,
-					name:       dtpReq.topics[0].name,
-					partitions: []partition{},
+					topicID:    meta.ID,
+					name:       compactString(meta.Name),
+					partitions: partitions,
 				},
 			},
 		}
 
-		err = app.getTopicMeta(dtpReq)
-		if err != nil {
-			log.Printf("getTopicsMeta: %v\n", err)
-		}
-
 		resp.body = respBody
-
 	}
 }
 
@@ -343,15 +360,13 @@ const (
 	ErrUnknownTopicOrPartition int16 = 3
 )
 
-func (a *app) getTopicMeta(req describeTopicPartitionsRequest) error {
-	contents, err := io.ReadAll(a.metadataFile)
+func (a *app) findTopicMeta(name string) (*metadata.TopicMeta, error) {
+	res, err := a.metadataSrv.FindTopicMeta(name)
 	if err != nil {
-		return fmt.Errorf("read __cluster_metadata %w: ", err)
+		return nil, fmt.Errorf("metadataSrv.FindTopicMeta with name %q: %w", name, err)
 	}
 
-	fmt.Println("contents")
-	fmt.Println(contents)
-	return nil
+	return res, nil
 }
 
 type topics []topic

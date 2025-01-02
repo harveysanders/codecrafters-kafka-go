@@ -4,9 +4,11 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/codecrafters-io/kafka-starter-go/app/metadata"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,6 +19,7 @@ func TestServer(t *testing.T) {
 				minVersion: 3, maxVersion: 4,
 			},
 		},
+		metadataSrv: &metadata.Service{},
 	}
 	srv := server{app}
 
@@ -177,11 +180,18 @@ func TestServer(t *testing.T) {
 }
 
 func TestDescribeTopicPartitions(t *testing.T) {
+	f, err := os.Open("./test_data/__cluster_metadata.log")
+	require.NoError(t, err)
+
+	metadataSrv := &metadata.Service{}
+	err = metadataSrv.Load(f)
+	require.NoError(t, err)
+
 	app := &app{
 		supportedAPIs: supportedAPIs{
 			APIKeyDescribeTopicPartitions: {},
 		},
-		metadataLogFilepath: "./test_data/__cluster_metadata.log",
+		metadataSrv: metadataSrv,
 	}
 	srv := server{app}
 
@@ -190,7 +200,7 @@ func TestDescribeTopicPartitions(t *testing.T) {
 		require.NoError(t, err)
 	}(t)
 
-	t.Run("'DescribeTopicPartitions' request", func(t *testing.T) {
+	t.Run("'DescribeTopicPartitions' request - no record", func(t *testing.T) {
 		request := []byte{
 			0x00, 0x00, 0x00, 0x20, // message_size: 32
 			0x00, 0x4b, // request_api_key: 75
@@ -256,6 +266,83 @@ func TestDescribeTopicPartitions(t *testing.T) {
 		require.Equal(t, []byte{0x00}, respBuf[32:33])
 		// >> partitions - nullable compact array length +1: 0 items (val: 1)
 		require.Equal(t, []byte{0x01}, respBuf[33:34])
+		// authorized operations
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[34:38])
+		// Tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[38:39])
+		// Next cursor
+		require.Equal(t, []byte{0xff}, respBuf[39:40])
+		// Tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[40:41])
+
+	})
+
+	t.Run("'DescribeTopicPartitions' request - record found", func(t *testing.T) {
+		request := []byte{
+			0x00, 0x00, 0x00, 0x20, // message_size: 32
+			0x00, 0x4b, // request_api_key: 75
+			0x00, 0x00, // request_api_version: v0
+			0x00, 0x00, 0x00, 0x07, // correlation_id: 7
+			// client_software_name
+			0x00, 0x09, // length  9
+			0x6b, 0x61, 0x66, 0x6b, 0x61, 0x2d, 0x63, 0x6c, 0x69, // kafka-cli
+			0x00, // tag buffer
+			// Body
+			0x02, // topics array length -1 (1)
+			// ___
+			0x04,             // topic name length -1 (3)
+			0x70, 0x61, 0x7a, // "paz"
+			0x00,                   // topic tag buffer
+			0x00, 0x00, 0x00, 0x64, // partition limit: 100
+			0xff, // cursor - null
+			0x00, // tag buffer
+		}
+
+		// wait for server to start
+		time.Sleep(20 * time.Millisecond)
+
+		client, err := net.Dial("tcp", "127.0.0.1:9092")
+		require.NoError(t, err)
+
+		defer func() {
+			_ = client.Close()
+		}()
+
+		nWritten, err := client.Write(request)
+		require.NoError(t, err)
+		require.Equal(t, len(request), nWritten)
+
+		var msgSize int32
+		err = binary.Read(client, binary.BigEndian, &msgSize)
+		require.NoError(t, err)
+
+		t.Log("msgSize", msgSize)
+		respBuf := make([]byte, msgSize)
+		_, err = io.ReadFull(client, respBuf)
+		require.NoError(t, err)
+
+		// Correlation ID
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x07}, respBuf[0:4])
+		// Tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[4:5])
+		// throttle_time_ms: 0
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[5:9])
+		// topics nullable compact array length +1:  1 item (val: 2)
+		require.Equal(t, []byte{0x02}, respBuf[9:10])
+		// >> topic [0] _______________________
+		// >> error code: int16(0) NO_ERROR
+		require.Equal(t, []byte{0x00, 0x00}, respBuf[10:12])
+		// >> topic name - nullable compact string: length: 3 - val 4
+		require.Equal(t, []byte{0x04}, respBuf[12:13])
+		// >> topic name: "paz"
+		require.Equal(t, []byte{0x70, 0x61, 0x7a}, respBuf[13:16])
+		// >> topic ID - 16byte UUID
+		// >> (00000000-0000-4000-8000-000000000041)
+		require.Equal(t, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x0, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x41}, respBuf[16:32])
+		// >> is_internal: false
+		require.Equal(t, []byte{0x00}, respBuf[32:33])
+		// >> partitions - nullable compact array length +1: 1 item (val: 2)
+		require.Equal(t, []byte{0x02}, respBuf[33:34])
 		// authorized operations
 		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[34:38])
 		// Tag buffer

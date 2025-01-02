@@ -11,6 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	ErrNotFound = errors.New("record not found")
+)
+
 type LogFile struct {
 	rdr      bufio.Reader // Reader to read the underlying log file.
 	err      error        // The current error, if any.
@@ -20,6 +24,101 @@ type LogFile struct {
 // NewLogFile returns a new [LogFile] that reads record batches from r.
 func NewLogFile(r io.Reader) *LogFile {
 	return &LogFile{rdr: *bufio.NewReader(r)}
+}
+
+type Service struct {
+	batches []RecordBatch
+}
+
+func New() *Service {
+	return &Service{}
+}
+
+// Load reads  __cluster_metadata topic's log file from r, unmarshals the content and stores the result on the service.
+func (s *Service) Load(r io.Reader) error {
+	f := NewLogFile(r)
+	s.batches = make([]RecordBatch, 0, 20)
+
+	for f.Next() {
+		_, b := f.Batch()
+		s.batches = append(s.batches, b)
+	}
+	if f.Err() != nil {
+		return fmt.Errorf("read record batch: %w", f.Err())
+	}
+
+	return nil
+}
+
+type TopicMeta struct {
+	Name       string
+	ID         uuid.UUID
+	IsInternal bool
+	Partitions []PartitionMeta
+}
+
+type PartitionMeta struct {
+	Index int32
+}
+
+func (s *Service) FindTopicMeta(name string) (*TopicMeta, error) {
+	if s.batches == nil {
+		return nil, errors.New("please load the metadata first with Load()")
+	}
+
+	tm := &TopicMeta{}
+	// TODO: Look up topic/partition records in the batches
+	topic, err := s.findTopicRecord(name)
+	if err != nil {
+		return nil, fmt.Errorf("findTopicRecord: %w", err)
+	}
+	p, err := s.findPartitionRecordByTopic(topic.UUID)
+	if err != nil {
+		return nil, fmt.Errorf("findPartitionRecordByTopic: %w", err)
+	}
+
+	tm.ID = topic.UUID
+	tm.Name = topic.Name
+	tm.Partitions = []PartitionMeta{{
+		Index: p.ID,
+	}}
+	return tm, nil
+}
+
+func (s *Service) findTopicRecord(name string) (*TopicRecord, error) {
+	for _, b := range s.batches {
+		for _, r := range b.Records {
+			if r.Type != TypeTopic {
+				continue
+			}
+			rec, ok := r.Value.(*TopicRecord)
+			if !ok {
+				return nil, fmt.Errorf("expected type TopicRecord, got %T", rec)
+			}
+			if rec.Name == name {
+				return rec, nil
+			}
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *Service) findPartitionRecordByTopic(topicID uuid.UUID) (*PartitionRecord, error) {
+	for _, b := range s.batches {
+		for _, r := range b.Records {
+			if r.Type != TypePartition {
+				continue
+			}
+			part, ok := r.Value.(*PartitionRecord)
+			if !ok {
+				return nil, fmt.Errorf("expected type PartitionRecord, got %T", part)
+			}
+			if part.TopicUUID == topicID {
+				return part, nil
+			}
+		}
+	}
+	return nil, errors.New("record not found")
 }
 
 // Batch returns the most recent record batch read from the log file.
