@@ -171,22 +171,25 @@ func TestReadRecords(t *testing.T) {
 
 func TestDecodeRecordValue(t *testing.T) {
 	testCases := []struct {
-		fileOffset int // Byte offset in example file data. The offset starts at the record's attributes field, skipping the length byte(s).
-		recLength  int
-		wantValue  any
+		// Byte offset to the record's value field in example file.
+		fileOffset int
+		// Length of the record's value.
+		recValueLength int
+		wantValue      any
 	}{
 		{
-			// Batches[1].Records[0]
-			fileOffset: 153,
-			recLength:  30,
+			// Batches[1].Records[0].Value
+			fileOffset:     158,
+			recValueLength: 24,
 			wantValue: metadata.TopicRecord{
 				Name: "saz",
+				UUID: uuid.MustParse(`00000000-0000-4000-8000-000000000091`),
 			},
 		},
 		{
-			// Batches[1].Records[1]
-			fileOffset: 185,
-			recLength:  72,
+			// Batches[1].Records[1].Value
+			fileOffset:     191,
+			recValueLength: 65,
 			wantValue: metadata.PartitionRecord{
 				TopicUUID: uuid.MustParse(`00000000-0000-4000-8000-000000000091`),
 			},
@@ -194,7 +197,7 @@ func TestDecodeRecordValue(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		data := exampleLogFile()[tc.fileOffset : tc.fileOffset+tc.recLength]
+		data := exampleLogFile()[tc.fileOffset : tc.fileOffset+tc.recValueLength]
 
 		switch v := tc.wantValue.(type) {
 		case metadata.PartitionRecord:
@@ -213,6 +216,8 @@ func TestDecodeRecordValue(t *testing.T) {
 			err := metadata.DecodeRecordValue(data, &got)
 			require.NoError(t, err)
 			require.Equal(t, want.Name, got.Name)
+			require.Equal(t, want.UUID.String(), got.UUID.String())
+
 		default:
 			t.Errorf("unhandled type %T\n", v)
 		}

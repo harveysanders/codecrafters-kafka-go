@@ -167,13 +167,16 @@ const (
 
 type TopicRecord struct {
 	// TODO: Add rest of the fields
-	Name string
-	UUID uuid.UUID
+	nameLen uint64
+	Name    string
+	UUID    uuid.UUID
 }
 
 type PartitionRecord struct {
 	// TODO: Add rest of the fields
-	TopicUUID uuid.UUID
+	ID        int32     // Partition ID is a 4-byte big-endian integer indicating the ID of the partition.
+	TopicUUID uuid.UUID // Topic UUID is a 16-byte raw byte array indicating the UUID of the topic.
+
 }
 
 type FeatureLevelRecord struct{}
@@ -189,6 +192,7 @@ type Record struct {
 	ValueLength       int64      // Value Length is a signed variable size integer indicating the length of the value of the record.
 	rawValue          []byte     // rawValue is a byte array indicating the value of the record.
 	HeadersArrayCount uint       // Header array count is an unsigned variable size integer indicating the number of headers present.
+	Value             any        // Pointer to unmarshaled record value, i.e. TopicRecord, PartitionRecord, etc.
 }
 
 func (rec *Record) ReadFrom(r io.Reader) (int64, error) {
@@ -256,6 +260,26 @@ func (rec *Record) ReadFrom(r io.Reader) (int64, error) {
 		cursor += n
 
 		rec.Type = RecordType(rec.rawValue[1])
+
+		switch rec.Type {
+		case TypeFeatureLevel:
+			rec.Value = &FeatureLevelRecord{}
+			if err := DecodeRecordValue(rec.rawValue, rec.Value); err != nil {
+				return int64(nRead), fmt.Errorf("decode feature level record: %w", err)
+			}
+		case TypePartition:
+			rec.Value = &PartitionRecord{}
+			if err := DecodeRecordValue(rec.rawValue, rec.Value); err != nil {
+				return int64(nRead), fmt.Errorf("decode partition record: %w", err)
+			}
+		case TypeTopic:
+			rec.Value = &TopicRecord{}
+			if err := DecodeRecordValue(rec.rawValue, rec.Value); err != nil {
+				return int64(nRead), fmt.Errorf("decode topic record: %w", err)
+			}
+		default:
+			return int64(nRead), fmt.Errorf("unsupported type %v", rec.Type)
+		}
 	}
 
 	return int64(nRead), nil
@@ -291,14 +315,33 @@ func checkN(n int) error {
 	return nil
 }
 
-func DecodeRecordValue(data []byte, val any) error {
-	switch v := val.(type) {
+func DecodeRecordValue(data []byte, value any) error {
+	var n int
+	var err error
+
+	switch v := value.(type) {
 	case *PartitionRecord:
-		fmt.Println(v)
+		var pos int = 3 // Skip frame version, type, version for now
+		v.ID = int32(binary.BigEndian.Uint32(data[pos : pos+4]))
+		pos += 4
+		v.TopicUUID, err = uuid.FromBytes(data[pos : pos+16])
+		if err != nil {
+			return fmt.Errorf("parse UUID: %w", err)
+		}
 	case *TopicRecord:
+		var pos int = 3 // Skip frame version, type, version for now
+		v.nameLen, n = binary.Uvarint(data[pos:])
+		pos += n
+		// nullish compact string: length - 1
+		v.Name = string(data[pos : pos+int(v.nameLen-1)])
+		pos += int(v.nameLen) - 1
+		v.UUID, err = uuid.FromBytes(data[pos : pos+16])
+		if err != nil {
+			return fmt.Errorf("parse UUID: %w", err)
+		}
 	case *FeatureLevelRecord:
 	default:
-		return fmt.Errorf("unrecognized type %T", val)
+		return fmt.Errorf("unsupported type %T", v)
 	}
 	return nil
 }
