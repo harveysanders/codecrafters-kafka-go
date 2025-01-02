@@ -172,7 +172,7 @@ type Record struct {
 	KeyLength         int64      // Key Length is a signed variable size integer indicating the length of the key of the record.
 	Key               []byte     // Key is a byte array indicating the key of the record.
 	ValueLength       int64      // Value Length is a signed variable size integer indicating the length of the value of the record.
-	Value             []byte     // Value is a byte array indicating the value of the record.
+	rawValue          []byte     // rawValue is a byte array indicating the value of the record.
 	HeadersArrayCount uint       // Header array count is an unsigned variable size integer indicating the number of headers present.
 }
 
@@ -201,10 +201,48 @@ func (rec *Record) ReadFrom(r io.Reader) (int64, error) {
 
 	var cursor int
 	rec.Attributes = int8(buf[cursor])
-	rec.TimestampDelta, n = binary.Varint(buf[1:])
+	cursor += 1
+
+	rec.TimestampDelta, n = binary.Varint(buf[cursor:])
+	cursor += n
 	if err := checkN(n); err != nil {
 		return int64(nRead), fmt.Errorf("read timestamp delta %w", err)
 	}
+
+	rec.OffsetDelta, n = binary.Varint(buf[cursor:])
+	cursor += n
+	if err := checkN(n); err != nil {
+		return int64(nRead), fmt.Errorf("read offset delta %w", err)
+	}
+
+	rec.KeyLength, n = binary.Varint(buf[cursor:])
+	cursor += n
+	if err := checkN(n); err != nil {
+		return int64(nRead), fmt.Errorf("read key length %w", err)
+	}
+
+	if rec.KeyLength > -1 {
+		rec.Key = make([]byte, rec.KeyLength)
+		n = copy(rec.Key, buf[cursor:cursor+int(rec.KeyLength)])
+		cursor += n
+	}
+
+	rec.ValueLength, n = binary.Varint(buf[cursor:])
+	cursor += n
+	if err := checkN(n); err != nil {
+		return int64(nRead), fmt.Errorf("read key length %w", err)
+	}
+
+	// Every value should have at least
+	// frame version and type (2 bytes)
+	if rec.ValueLength >= 2 {
+		rec.rawValue = make([]byte, rec.ValueLength)
+		n = copy(rec.rawValue, buf[cursor:cursor+int(rec.ValueLength)])
+		cursor += n
+
+		rec.Type = RecordType(rec.rawValue[1])
+	}
+
 	return int64(nRead), nil
 }
 

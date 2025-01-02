@@ -124,8 +124,9 @@ func TestReadRecords(t *testing.T) {
 			// first record @ byte 61
 			Records: []metadata.Record{
 				{
-					Length: 29,
-					Type:   metadata.TypeFeatureLevel,
+					Length:      29,
+					ValueLength: 23,
+					Type:        metadata.TypeFeatureLevel,
 				},
 			},
 		},
@@ -133,16 +134,19 @@ func TestReadRecords(t *testing.T) {
 			// should @ byte 91
 			Records: []metadata.Record{
 				{
-					Length: 30,
-					Type:   metadata.TypeTopic,
+					Length:      30,
+					ValueLength: 24,
+					Type:        metadata.TypeTopic,
 				},
 				{
-					Length: 72,
-					Type:   metadata.TypePartition,
+					Length:      72,
+					ValueLength: 65,
+					Type:        metadata.TypePartition,
 				},
 				{
-					Length: 72,
-					Type:   metadata.TypePartition,
+					Length:      72,
+					ValueLength: 65,
+					Type:        metadata.TypePartition,
 				},
 			},
 		},
@@ -154,9 +158,10 @@ func TestReadRecords(t *testing.T) {
 		i, batch := logFile.Batch()
 		for j, gotRecord := range batch.Records {
 			wantRecord := wantBatches[i].Records[j]
-			require.Equal(t, wantRecord.Length, gotRecord.Length)
 			fmt.Printf("i: %d, j: %d, len: %d\n", i, j, wantRecord.Length)
-			// require.Equal(t, wantRecord.Type, gotRecord.Type)
+			require.Equal(t, wantRecord.Length, gotRecord.Length)
+			require.Equal(t, wantRecord.ValueLength, gotRecord.ValueLength)
+			require.Equal(t, wantRecord.Type, gotRecord.Type)
 		}
 		require.NoError(t, batch.Err())
 	}
