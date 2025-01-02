@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/codecrafters-io/kafka-starter-go/app/metadata"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -166,6 +167,56 @@ func TestReadRecords(t *testing.T) {
 		require.NoError(t, batch.Err())
 	}
 	require.NoError(t, logFile.Err())
+}
+
+func TestDecodeRecordValue(t *testing.T) {
+	testCases := []struct {
+		fileOffset int // Byte offset in example file data. The offset starts at the record's attributes field, skipping the length byte(s).
+		recLength  int
+		wantValue  any
+	}{
+		{
+			// Batches[1].Records[0]
+			fileOffset: 153,
+			recLength:  30,
+			wantValue: metadata.TopicRecord{
+				Name: "saz",
+			},
+		},
+		{
+			// Batches[1].Records[1]
+			fileOffset: 185,
+			recLength:  72,
+			wantValue: metadata.PartitionRecord{
+				TopicUUID: uuid.MustParse(`00000000-0000-4000-8000-000000000091`),
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		data := exampleLogFile()[tc.fileOffset : tc.fileOffset+tc.recLength]
+
+		switch v := tc.wantValue.(type) {
+		case metadata.PartitionRecord:
+			want := tc.wantValue.(metadata.PartitionRecord)
+
+			var got metadata.PartitionRecord
+			err := metadata.DecodeRecordValue(data, &got)
+			require.NoError(t, err)
+
+			require.Equal(t, want.TopicUUID.String(), got.TopicUUID.String())
+
+		case metadata.TopicRecord:
+			want := tc.wantValue.(metadata.TopicRecord)
+
+			var got metadata.TopicRecord
+			err := metadata.DecodeRecordValue(data, &got)
+			require.NoError(t, err)
+			require.Equal(t, want.Name, got.Name)
+		default:
+			t.Errorf("unhandled type %T\n", v)
+		}
+	}
 }
 
 func exampleLogFile() []byte {

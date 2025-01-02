@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type LogFile struct {
@@ -163,6 +165,19 @@ const (
 	TypeFeatureLevel RecordType = 0x0c
 )
 
+type TopicRecord struct {
+	// TODO: Add rest of the fields
+	Name string
+	UUID uuid.UUID
+}
+
+type PartitionRecord struct {
+	// TODO: Add rest of the fields
+	TopicUUID uuid.UUID
+}
+
+type FeatureLevelRecord struct{}
+
 type Record struct {
 	Length            int64      // Length is a signed variable size integer indicating the length of the record, the length is calculated from the attributes field to the end of the record.
 	Attributes        int8       // Attributes is a 1-byte big-endian integer indicating the attributes of the record. Currently, this field is unused in the protocol.
@@ -272,6 +287,18 @@ func checkN(n int) error {
 	}
 	if n < 0 {
 		return errors.New("overflow")
+	}
+	return nil
+}
+
+func DecodeRecordValue(data []byte, val any) error {
+	switch v := val.(type) {
+	case *PartitionRecord:
+		fmt.Println(v)
+	case *TopicRecord:
+	case *FeatureLevelRecord:
+	default:
+		return fmt.Errorf("unrecognized type %T", val)
 	}
 	return nil
 }
