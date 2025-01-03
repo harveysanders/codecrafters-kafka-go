@@ -492,6 +492,7 @@ type partition struct {
 func (p partition) WriteTo(w io.Writer) (int64, error) {
 	buf := make([]byte, 0, 1024)
 	buf = binary.BigEndian.AppendUint16(buf, uint16(p.errorCode))
+	buf = binary.BigEndian.AppendUint32(buf, uint32(p.partitionIndex))
 	buf = binary.BigEndian.AppendUint32(buf, uint32(p.leaderID))
 	buf = binary.BigEndian.AppendUint32(buf, uint32(p.leaderEpoch))
 	buf = writeNodes(buf, p.replicaNodes)
