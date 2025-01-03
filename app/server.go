@@ -87,15 +87,9 @@ func (s *server) Close() error {
 }
 
 func main() {
-	// Load metadata file
-	f, err := os.Open("/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log")
-	if err != nil {
-		log.Fatalf("open topics metadata log file: %v", err)
-	}
-
 	srv := server{
 		app: newApp(
-			WithMetadataLogFile(f),
+			WithMetadataLogFilePath("/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log"),
 		),
 	}
 

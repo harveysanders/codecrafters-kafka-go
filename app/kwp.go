@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 
 	"github.com/codecrafters-io/kafka-starter-go/app/metadata"
 	"github.com/google/uuid"
@@ -27,21 +28,18 @@ type supportedAPIs map[apiIndex]struct {
 	minVersion, maxVersion int16
 }
 type app struct {
-	supportedAPIs supportedAPIs     // List of supported APIs.
-	metadataFile  io.Reader         // Topic metadata log contents.
-	metadataSrv   *metadata.Service // Cluster topic metadata service.
+	supportedAPIs    supportedAPIs     // List of supported APIs.
+	metadataFile     io.Reader         // Topic metadata log contents.
+	metadataSrv      *metadata.Service // Cluster topic metadata service.
+	metadataFilepath string            // Path to cluster topic metadata log file.
 }
 
 type option func(*app)
 
-// WithMetadataLogFile sets and loads the cluster's topic's log file.
-func WithMetadataLogFile(r io.Reader) func(a *app) {
+// WithMetadataLogFilePath sets and loads the cluster's topic's log file.
+func WithMetadataLogFilePath(filepath string) func(a *app) {
 	return func(a *app) {
-		a.metadataSrv = &metadata.Service{}
-		if err := a.metadataSrv.Load(r); err != nil {
-			panic(fmt.Sprintf("load metadata %v", err))
-		}
-		a.metadataFile = r
+		a.metadataFilepath = filepath
 	}
 }
 
@@ -361,6 +359,15 @@ const (
 )
 
 func (a *app) findTopicMeta(name string) (*metadata.TopicMeta, error) {
+	f, err := os.Open(a.metadataFilepath)
+	if err != nil {
+		return nil, fmt.Errorf("open metadata file: %w", err)
+	}
+
+	a.metadataFile = f
+	if err := a.metadataSrv.Load(a.metadataFile); err != nil {
+		return nil, fmt.Errorf("load metadata file: %w", err)
+	}
 	res, err := a.metadataSrv.FindTopicMeta(name)
 	if err != nil {
 		return nil, fmt.Errorf("metadataSrv.FindTopicMeta with name %q: %w", name, err)
