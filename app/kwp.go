@@ -324,14 +324,25 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 			return
 		}
 
+		respBody := describeTopicPartitionsResponse{
+			topics: []topicResponse{{
+				name: dtpReq.topics[0].name,
+			}},
+		}
+
 		// Look up topic (only one for now)
 		meta, err := app.findTopicMeta(string(dtpReq.topics[0].name))
 		if err != nil {
 			log.Printf("Error finding topic metadata: %v\n", err)
 			if !errors.Is(err, metadata.ErrNotFound) {
-				// TODO: Error response
+				respBody.topics[0].errorCode = ErrUnknownServerError
+				resp.body = respBody
 				return
 			}
+
+			respBody.topics[0].errorCode = ErrUnknownTopicOrPartition
+			resp.body = respBody
+			return
 		}
 
 		partitions := make([]partition, 0, len(meta.Partitions))
@@ -340,7 +351,8 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 				partitionIndex: v.Index,
 			})
 		}
-		respBody := describeTopicPartitionsResponse{
+
+		respBody = describeTopicPartitionsResponse{
 			topics: []topicResponse{
 				{
 					topicID:    meta.ID,
@@ -355,6 +367,7 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 }
 
 const (
+	ErrUnknownServerError      int16 = -1
 	ErrUnknownTopicOrPartition int16 = 3
 )
 
