@@ -344,23 +344,30 @@ func TestDescribeTopicPartitions(t *testing.T) {
 		// >> >> partition index
 		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[36:40])
 		// >> >> leader ID
-		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x01}, respBuf[40:44])
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[40:44])
 		// >> >> leader epoch
 		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[44:48])
-		// >> >> replica nodes (node)
-		require.Equal(t, []byte{0x00}, respBuf[48:49])
-		// >> >> ISR nodes (node)
-		require.Equal(t, []byte{0x00}, respBuf[49:50])
+		// >> >> replica nodes (node) empty
+		require.Equal(t, []byte{0x01}, respBuf[48:49])
+		// >> >> ISR nodes (node) empty
+		require.Equal(t, []byte{0x01}, respBuf[49:50])
+		// >> >> Eligible Leaders empty
+		require.Equal(t, []byte{0x01}, respBuf[50:51])
+		// >> >> Last Known ELR empty
+		require.Equal(t, []byte{0x01}, respBuf[51:52])
+		// >> >> Offline replicas empty
+		require.Equal(t, []byte{0x01}, respBuf[52:53])
+		// >> >> tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[53:54])
 
-		// TODO: Update indexes
 		// authorized operations
-		// require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[34:38])
-		// // Tag buffer
-		// require.Equal(t, []byte{0x00}, respBuf[38:39])
-		// // Next cursor
-		// require.Equal(t, []byte{0xff}, respBuf[39:40])
-		// // Tag buffer
-		// require.Equal(t, []byte{0x00}, respBuf[40:41])
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[54:58])
+		// Tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[58:59])
+		// Next cursor
+		require.Equal(t, []byte{0xff}, respBuf[59:60])
+		// Tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[60:61])
 
 	})
 }

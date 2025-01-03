@@ -507,7 +507,7 @@ func (p partition) WriteTo(w io.Writer) (int64, error) {
 }
 
 func writeNodes(buf []byte, nodes []int32) []byte {
-	buf = binary.AppendVarint(buf, int64(len(nodes)+1))
+	buf = binary.AppendUvarint(buf, uint64(len(nodes)+1))
 	for _, node := range nodes {
 		buf = binary.BigEndian.AppendUint32(buf, uint32(node))
 	}
@@ -678,7 +678,7 @@ func (c compactArrayResp[T]) WriteTo(w io.Writer) (int64, error) {
 	buf := make([]byte, 8)
 	n := binary.PutUvarint(buf, uint64(len(c)+1))
 	if _, err := w.Write(buf[:n]); err != nil {
-		return 0, fmt.Errorf("write number of tagged fields: %w", err)
+		return 0, fmt.Errorf("write %T length: %w", c, err)
 	}
 	nWritten := int64(n)
 
