@@ -483,8 +483,27 @@ type partition struct {
 }
 
 func (p partition) WriteTo(w io.Writer) (int64, error) {
-	// TODO:
-	return 0, nil
+	buf := make([]byte, 0, 1024)
+	buf = binary.BigEndian.AppendUint16(buf, uint16(p.errorCode))
+	buf = binary.BigEndian.AppendUint32(buf, uint32(p.leaderID))
+	buf = binary.BigEndian.AppendUint32(buf, uint32(p.leaderEpoch))
+	buf = writeNodes(buf, p.replicaNodes)
+	buf = writeNodes(buf, p.isrNodes)
+	buf = writeNodes(buf, p.eligibleLeaderReplicas)
+	buf = writeNodes(buf, p.lastKnownELR)
+	buf = writeNodes(buf, p.offlineReplicas)
+	// tag buffer
+	buf = append(buf, 0x00)
+	n, err := w.Write(buf)
+	return int64(n), err
+}
+
+func writeNodes(buf []byte, nodes []int32) []byte {
+	buf = binary.AppendVarint(buf, int64(len(nodes)+1))
+	for _, node := range nodes {
+		buf = binary.BigEndian.AppendUint32(buf, uint32(node))
+	}
+	return buf
 }
 
 type topicResponse struct {
