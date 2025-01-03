@@ -72,16 +72,18 @@ func (s *Service) FindTopicMeta(name string) (*TopicMeta, error) {
 	if err != nil {
 		return nil, fmt.Errorf("findTopicRecord: %w", err)
 	}
-	p, err := s.findPartitionRecordByTopic(topic.UUID)
+	parts, err := s.findPartitionsRecordByTopic(topic.UUID)
 	if err != nil {
 		return nil, fmt.Errorf("findPartitionRecordByTopic: %w", err)
 	}
 
 	tm.ID = topic.UUID
 	tm.Name = topic.Name
-	tm.Partitions = []PartitionMeta{{
-		Index: p.ID,
-	}}
+	tm.Partitions = make([]PartitionMeta, 0, len(parts))
+	for _, p := range parts {
+		tm.Partitions = append(tm.Partitions, PartitionMeta{Index: p.ID})
+	}
+
 	return tm, nil
 }
 
@@ -103,7 +105,9 @@ func (s *Service) findTopicRecord(name string) (*TopicRecord, error) {
 	return nil, ErrNotFound
 }
 
-func (s *Service) findPartitionRecordByTopic(topicID uuid.UUID) (*PartitionRecord, error) {
+func (s *Service) findPartitionsRecordByTopic(topicID uuid.UUID) ([]PartitionRecord, error) {
+	parts := make([]PartitionRecord, 0, 10)
+
 	for _, b := range s.batches {
 		for _, r := range b.Records {
 			if r.Type != TypePartition {
@@ -114,11 +118,14 @@ func (s *Service) findPartitionRecordByTopic(topicID uuid.UUID) (*PartitionRecor
 				return nil, fmt.Errorf("expected type PartitionRecord, got %T", part)
 			}
 			if part.TopicUUID == topicID {
-				return part, nil
+				parts = append(parts, *part)
 			}
 		}
 	}
-	return nil, errors.New("record not found")
+	if len(parts) == 0 {
+		return nil, errors.New("record not found")
+	}
+	return parts, nil
 }
 
 // Batch returns the most recent record batch read from the log file.

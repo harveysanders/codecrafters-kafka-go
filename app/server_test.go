@@ -272,7 +272,7 @@ func TestDescribeTopicPartitions(t *testing.T) {
 
 	})
 
-	t.Run("'DescribeTopicPartitions' request - record found", func(t *testing.T) {
+	t.Run("'DescribeTopicPartitions' request - record found 'bar'", func(t *testing.T) {
 		request := []byte{
 			0x00, 0x00, 0x00, 0x20, // message_size: 32
 			0x00, 0x4b, // request_api_key: 75
@@ -286,7 +286,7 @@ func TestDescribeTopicPartitions(t *testing.T) {
 			0x02, // topics array length -1 (1)
 			// ___
 			0x04,             // topic name length -1 (3)
-			0x70, 0x61, 0x7a, // "paz"
+			0x62, 0x61, 0x72, // "bar"
 			0x00,                   // topic tag buffer
 			0x00, 0x00, 0x00, 0x64, // partition limit: 100
 			0xff, // cursor - null
@@ -329,11 +329,11 @@ func TestDescribeTopicPartitions(t *testing.T) {
 		require.Equal(t, []byte{0x00, 0x00}, respBuf[10:12])
 		// >> topic name - nullable compact string: length: 3 - val 4
 		require.Equal(t, []byte{0x04}, respBuf[12:13])
-		// >> topic name: "paz"
-		require.Equal(t, []byte{0x70, 0x61, 0x7a}, respBuf[13:16])
+		// >> topic name: "bar"
+		require.Equal(t, []byte{0x62, 0x61, 0x72}, respBuf[13:16])
 		// >> topic ID - 16byte UUID
 		// >> (00000000-0000-4000-8000-000000000041)
-		require.Equal(t, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x0, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x41}, respBuf[16:32])
+		require.Equal(t, []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x0, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x42}, respBuf[16:32])
 		// >> is_internal: false
 		require.Equal(t, []byte{0x00}, respBuf[32:33])
 		// >> partitions - nullable compact array length +1: 1 item (val: 2)
@@ -369,5 +369,9 @@ func TestDescribeTopicPartitions(t *testing.T) {
 		// Tag buffer
 		require.Equal(t, []byte{0x00}, respBuf[60:61])
 
+	})
+
+	t.Run("'DescribeTopicPartitions' request - multiple records found 'paz'", func(t *testing.T) {
+		t.Skip("TODO")
 	})
 }
