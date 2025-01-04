@@ -374,4 +374,56 @@ func TestDescribeTopicPartitions(t *testing.T) {
 	t.Run("'DescribeTopicPartitions' request - multiple records found 'paz'", func(t *testing.T) {
 		t.Skip("TODO")
 	})
+
+	t.Run("'DescribeTopicPartitions' request - multiple topics", func(t *testing.T) {
+		request := []byte{
+			0x00, 0x00, 0x00, 0x2d, 0x00, 0x4b, 0x00, 0x00, 0x7f, 0x8a, 0xc0, 0x26, 0x00,
+			0x0c, 0x6b, 0x61,
+
+			0x66, 0x6b, 0x61, 0x2d, 0x74, 0x65, 0x73, 0x74, 0x65, 0x72, 0x00,
+			0x04, // topics length (3)
+			// topic name
+			// byte 29
+			0x04,             // length 3
+			0x62, 0x61, 0x7a, // "baz"
+			0x00, // topic tag buffer
+
+			// byte
+			// topic name
+			0x04,             // length 3
+			0x70, 0x61, 0x78, // "pax"
+			0x00, // topic tag buffer
+
+			// topic name
+			0x04,             // length 3
+			0x71, 0x75, 0x78, // "qux"
+			0x00, // topic tag buffer
+
+			0x00, 0x00,
+			0x00, 0x04, 0xff,
+
+			0x00,
+		}
+
+		// wait for server to start
+		time.Sleep(20 * time.Millisecond)
+
+		client, err := net.Dial("tcp", "127.0.0.1:9092")
+		require.NoError(t, err)
+
+		defer func() {
+			_ = client.Close()
+		}()
+
+		nWritten, err := client.Write(request)
+		require.NoError(t, err)
+		require.Equal(t, len(request), nWritten)
+
+		var msgSize int32
+		err = binary.Read(client, binary.BigEndian, &msgSize)
+		require.NoError(t, err)
+
+		t.Log("msgSize", msgSize)
+	})
+
 }

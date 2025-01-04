@@ -55,6 +55,7 @@ type TopicMeta struct {
 	ID         uuid.UUID
 	IsInternal bool
 	Partitions []PartitionMeta
+	Err        error
 }
 
 type PartitionMeta struct {

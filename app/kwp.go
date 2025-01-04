@@ -324,42 +324,58 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 			return
 		}
 
-		respBody := describeTopicPartitionsResponse{
-			topics: []topicResponse{{
-				name: dtpReq.topics[0].name,
-			}},
-		}
-
-		// Look up topic (only one for now)
-		meta, err := app.findTopicMeta(string(dtpReq.topics[0].name))
+		// TODO: vvv clean this up vvv
+		// Load metadata log file
+		f, err := os.Open(app.metadataFilepath)
 		if err != nil {
-			log.Printf("Error finding topic metadata: %v\n", err)
-			if !errors.Is(err, metadata.ErrNotFound) {
-				respBody.topics[0].errorCode = ErrUnknownServerError
-				resp.body = respBody
-				return
-			}
-
-			respBody.topics[0].errorCode = ErrUnknownTopicOrPartition
-			resp.body = respBody
+			log.Printf("open metadata file: %v\n", err)
 			return
 		}
 
-		partitions := make([]partition, 0, len(meta.Partitions))
-		for _, v := range meta.Partitions {
-			partitions = append(partitions, partition{
-				partitionIndex: v.Index,
-			})
+		app.metadataFile = f
+		if err := app.metadataSrv.Load(app.metadataFile); err != nil {
+			log.Printf("load metadata file: %v", err)
+			return
+		}
+		// TODO: ^^^ clean this up ^^^
+
+		names := make([]string, 0, len(dtpReq.topics))
+		for _, v := range dtpReq.topics {
+			names = append(names, string(v.name))
 		}
 
-		respBody = describeTopicPartitionsResponse{
-			topics: []topicResponse{
-				{
-					topicID:    meta.ID,
-					name:       compactString(meta.Name),
-					partitions: partitions,
+		foundTopics := app.findTopicsMeta(names)
+		respBody := describeTopicPartitionsResponse{
+			topics: make([]topicResponse, len(foundTopics)),
+		}
+		for i, meta := range foundTopics {
+			respBody.topics[i] = topicResponse{name: compactString(meta.Name)}
+			if err := meta.Err; err != nil {
+				if !errors.Is(err, metadata.ErrNotFound) {
+					respBody.topics[i].errorCode = ErrUnknownServerError
+					continue
+				}
+
+				respBody.topics[i].errorCode = ErrUnknownTopicOrPartition
+				continue
+			}
+
+			partitions := make([]partition, 0, len(meta.Partitions))
+			for _, v := range meta.Partitions {
+				partitions = append(partitions, partition{
+					partitionIndex: v.Index,
+				})
+			}
+
+			respBody = describeTopicPartitionsResponse{
+				topics: []topicResponse{
+					{
+						topicID:    meta.ID,
+						name:       compactString(meta.Name),
+						partitions: partitions,
+					},
 				},
-			},
+			}
 		}
 
 		resp.body = respBody
@@ -371,22 +387,18 @@ const (
 	ErrUnknownTopicOrPartition int16 = 3
 )
 
-func (a *app) findTopicMeta(name string) (*metadata.TopicMeta, error) {
-	f, err := os.Open(a.metadataFilepath)
-	if err != nil {
-		return nil, fmt.Errorf("open metadata file: %w", err)
+func (a *app) findTopicsMeta(names []string) []metadata.TopicMeta {
+	res := make([]metadata.TopicMeta, 0, len(names))
+	for _, name := range names {
+		found, err := a.metadataSrv.FindTopicMeta(name)
+		if err != nil {
+			res = append(res, metadata.TopicMeta{Name: name, Err: err})
+			continue
+		}
+		res = append(res, *found)
 	}
 
-	a.metadataFile = f
-	if err := a.metadataSrv.Load(a.metadataFile); err != nil {
-		return nil, fmt.Errorf("load metadata file: %w", err)
-	}
-	res, err := a.metadataSrv.FindTopicMeta(name)
-	if err != nil {
-		return nil, fmt.Errorf("metadataSrv.FindTopicMeta with name %q: %w", name, err)
-	}
-
-	return res, nil
+	return res
 }
 
 type topics []topic
@@ -439,7 +451,7 @@ func readCompactArrayLen(r io.Reader) (len uint64, n int64, err error) {
 
 type topic struct {
 	name      compactString
-	tagBuffer taggedFields
+	tagBuffer int8
 }
 
 func (c *topic) ReadFrom(r io.Reader) (int64, error) {
@@ -448,7 +460,11 @@ func (c *topic) ReadFrom(r io.Reader) (int64, error) {
 	if err != nil {
 		return n, fmt.Errorf("read topic name: %w", err)
 	}
-	return n, nil
+
+	if err := binary.Read(r, binary.BigEndian, c.tagBuffer); err != nil {
+		return n, fmt.Errorf("read topic tagged buffer: %w", err)
+	}
+	return n + 1, nil
 }
 
 type describeTopicPartitionsRequest struct {
@@ -659,6 +675,10 @@ func (c *compactString) ReadFrom(r io.Reader) (int64, error) {
 	strLenPlus1, err := binary.ReadUvarint(rdr)
 	if err != nil {
 		return int64(1), fmt.Errorf("reading string length: %w", err)
+	}
+	if strLenPlus1 == 0 {
+		c = nil
+		return int64(1), nil
 	}
 
 	buf := make([]byte, strLenPlus1-1)
