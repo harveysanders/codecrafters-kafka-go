@@ -20,6 +20,7 @@ type apiIndex int16
 
 const (
 	APIKeyProduce                 apiIndex = 0
+	APIKeyFetch                   apiIndex = 1
 	APIKeyApiVersions             apiIndex = 18
 	APIKeyDescribeTopicPartitions apiIndex = 75
 )
@@ -46,6 +47,10 @@ func WithMetadataLogFilePath(filepath string) func(a *app) {
 func newApp(opts ...option) *app {
 	app := &app{
 		supportedAPIs: supportedAPIs{
+			APIKeyFetch: {
+				minVersion: 16,
+				maxVersion: 16,
+			},
 			APIKeyApiVersions: {
 				minVersion: 3,
 				maxVersion: 4,
