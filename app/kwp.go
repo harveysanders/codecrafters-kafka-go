@@ -367,14 +367,10 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 				})
 			}
 
-			respBody = describeTopicPartitionsResponse{
-				topics: []topicResponse{
-					{
-						topicID:    meta.ID,
-						name:       compactString(meta.Name),
-						partitions: partitions,
-					},
-				},
+			respBody.topics[i] = topicResponse{
+				topicID:    meta.ID,
+				name:       compactString(meta.Name),
+				partitions: partitions,
 			}
 		}
 
@@ -461,7 +457,7 @@ func (c *topic) ReadFrom(r io.Reader) (int64, error) {
 		return n, fmt.Errorf("read topic name: %w", err)
 	}
 
-	if err := binary.Read(r, binary.BigEndian, c.tagBuffer); err != nil {
+	if err := binary.Read(r, binary.BigEndian, &c.tagBuffer); err != nil {
 		return n, fmt.Errorf("read topic tagged buffer: %w", err)
 	}
 	return n + 1, nil
