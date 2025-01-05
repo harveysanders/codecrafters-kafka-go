@@ -58,6 +58,8 @@ func (s *server) handle(conn net.Conn) {
 			body: &bytes.Buffer{},
 		}
 		switch req.header.requestAPIKey {
+		case APIKeyFetch:
+			s.app.handleFetchRequest()(&resp, req)
 		case APIKeyApiVersions:
 			// downgrade to v0 header version
 			resp.header.version = headerVersion0

@@ -644,24 +644,80 @@ func (d describeTopicPartitionsResponse) WriteTo(w io.Writer) (int64, error) {
 	return int64(bw.Buffered()), nil
 }
 
-const (
-	// READ (bit index 3 from the right)
-	aclOpRead = 1 << 3
-	// WRITE (bit index 4 from the right)
-	aclOpWrite = 1 << 4
-	// CREATE (bit index 5 from the right)
-	aclOpCreate = 1 << 5
-	// DELETE (bit index 6 from the right)
-	aclOpDelete = 1 << 6
-	// ALTER (bit index 7 from the right)
-	aclOpAlter = 1 << 7
-	// DESCRIBE (bit index 8 from the right)
-	aclOpDescribe = 1 << 8
-	// DESCRIBE_CONFIGS (bit index 10 from the right)
-	aclOpDescribeConfigs = 1 << 10
-	// ALTER_CONFIGS (bit index 11 from the right)
-	aclOpAlterConfigs = 1 << 11
-)
+type fetchTopic struct {
+	ID         uuid.UUID
+	Partitions []struct {
+	}
+}
+type fetchRequest struct {
+	MaxWaitMS      int32
+	MinBytes       int32
+	MaxBytes       int32
+	IsolationLevel int8
+	SessionID      int32
+	SessionEpoch   int32
+	Topics         []fetchTopic
+}
+
+func (f fetchRequest) ReadFrom(r io.Reader) (int64, error) {
+	return int64(0), nil
+}
+
+type fetchPartitionResp struct {
+}
+
+type fetchTopicResponse struct {
+	TopicID    uuid.UUID
+	Partitions []fetchPartitionResp
+}
+
+func (f fetchTopicResponse) WriteTo(w io.Writer) (int64, error) {
+	return int64(0), nil
+}
+
+type fetchResponse struct {
+	ThrottleTimeMS int32
+	ErrorCode      int16
+	SessionID      int32
+	responses      compactArrayResp[fetchTopicResponse]
+}
+
+func (f fetchResponse) WriteTo(w io.Writer) (int64, error) {
+	buf := make([]byte, 0, 16)
+	buf = binary.BigEndian.AppendUint32(buf, uint32(f.ThrottleTimeMS))
+	buf = binary.BigEndian.AppendUint16(buf, uint16(f.ErrorCode))
+	buf = binary.BigEndian.AppendUint32(buf, uint32(f.SessionID))
+	buf = append(buf, 0x00) // Topic responses
+	buf = append(buf, 0x00) // tag buffer
+	n, err := w.Write(buf)
+	return int64(n), err
+}
+
+func (app *app) handleFetchRequest() func(resp *response, req *request) {
+	minVersion := app.supportedAPIs[APIKeyFetch].minVersion
+	maxVersion := app.supportedAPIs[APIKeyFetch].maxVersion
+	return func(resp *response, req *request) {
+		requestedVer := req.header.requestAPIVersion
+
+		if requestedVer > maxVersion || requestedVer < minVersion {
+			resp.body = apiVersionsResponse{
+				errorCode: APIVersionsErrUnsupportedVersion,
+			}
+			return
+		}
+
+		// Read request from body
+		br := bufio.NewReader(req.body)
+		var fetchReq fetchRequest
+		_, err := fetchReq.ReadFrom(br)
+		if err != nil {
+			log.Printf("fetch request error: %v", err)
+			return
+		}
+
+		resp.body = fetchResponse{responses: []fetchTopicResponse{}}
+	}
+}
 
 // compactString contains a 32-bit unsigned varint representing the
 // string's length + 1, followed by the string bytes.
