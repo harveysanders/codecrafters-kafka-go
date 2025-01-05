@@ -383,9 +383,12 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 	}
 }
 
+type errorCode int16
+
 const (
-	ErrUnknownServerError      int16 = -1
-	ErrUnknownTopicOrPartition int16 = 3
+	ErrUnknownServerError      errorCode = -1
+	ErrUnknownTopicOrPartition errorCode = 3
+	ErrUnknownTopicID          errorCode = 100
 )
 
 func (a *app) findTopicsMeta(names []string) []metadata.TopicMeta {
@@ -545,7 +548,7 @@ func writeNodes(buf []byte, nodes []int32) []byte {
 }
 
 type topicResponse struct {
-	errorCode                 int16
+	errorCode                 errorCode
 	name                      compactString
 	topicID                   uuid.UUID
 	isInternal                bool
@@ -649,6 +652,20 @@ type fetchTopic struct {
 	Partitions []struct {
 	}
 }
+
+func (f *fetchTopic) ReadFrom(r io.Reader) (int64, error) {
+	buf := make([]byte, 0, 16)
+	n, err := r.Read(buf)
+	if err != nil {
+		return int64(n), fmt.Errorf("read topic ID: %w,", err)
+	}
+	f.ID, err = uuid.FromBytes(buf)
+	if err != nil {
+		return int64(n), fmt.Errorf("parse topic ID: %w,", err)
+	}
+	return int64(n), nil
+}
+
 type fetchRequest struct {
 	MaxWaitMS      int32
 	MinBytes       int32
@@ -659,11 +676,37 @@ type fetchRequest struct {
 	Topics         []fetchTopic
 }
 
-func (f fetchRequest) ReadFrom(r io.Reader) (int64, error) {
-	return int64(0), nil
+func (f *fetchRequest) ReadFrom(r io.Reader) (int64, error) {
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		return 0, fmt.Errorf("expected byte reader, got %T", r)
+	}
+	_ = binary.Read(br, binary.BigEndian, f.MaxWaitMS)
+	_ = binary.Read(br, binary.BigEndian, f.MinBytes)
+	_ = binary.Read(br, binary.BigEndian, f.MaxBytes)
+	_ = binary.Read(br, binary.BigEndian, f.IsolationLevel)
+	_ = binary.Read(br, binary.BigEndian, f.SessionID)
+	_ = binary.Read(br, binary.BigEndian, f.SessionEpoch)
+	n := int64(4 + 4 + 4 + 1 + 4 + 4)
+	topicLen, err := binary.ReadUvarint(br)
+	if err != nil {
+		return n, fmt.Errorf("read topics length:%w", err)
+	}
+	topics := make([]fetchTopic, topicLen)
+	for i, t := range topics {
+		nRead, err := t.ReadFrom(br)
+		if err != nil {
+			return n + nRead, fmt.Errorf("read topic: %w", err)
+		}
+		n += nRead
+		topics[i] = t
+	}
+	return n, nil
 }
 
 type fetchPartitionResp struct {
+	PartitionIndex int32
+	ErrorCode      errorCode
 }
 
 type fetchTopicResponse struct {
@@ -715,7 +758,12 @@ func (app *app) handleFetchRequest() func(resp *response, req *request) {
 			return
 		}
 
-		resp.body = fetchResponse{responses: []fetchTopicResponse{}}
+		resp.body = fetchResponse{
+			responses: []fetchTopicResponse{{
+				TopicID:    fetchReq.Topics[0].ID,
+				Partitions: []fetchPartitionResp{{ErrorCode: ErrUnknownTopicID}},
+			}},
+		}
 	}
 }
 
