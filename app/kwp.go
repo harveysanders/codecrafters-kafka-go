@@ -69,6 +69,8 @@ func newApp(opts ...option) *app {
 	return app
 }
 
+type handlerFunc func(resp *response, req *request)
+
 type version string
 
 const (
@@ -224,8 +226,6 @@ func (tf taggedFields) WriteTo(w io.Writer) (int64, error) {
 }
 
 func (app *app) handleAPIVersionsRequest() func(resp *response, req *request) {
-	minVersion := app.supportedAPIs[APIKeyApiVersions].minVersion
-	maxVersion := app.supportedAPIs[APIKeyApiVersions].maxVersion
 	apiKeys := make([]apiKey, 0, len(app.supportedAPIs))
 	for key, api := range app.supportedAPIs {
 		apiKeys = append(apiKeys, apiKey{
@@ -236,15 +236,6 @@ func (app *app) handleAPIVersionsRequest() func(resp *response, req *request) {
 	}
 
 	return func(resp *response, req *request) {
-		requestedVer := req.header.requestAPIVersion
-
-		if requestedVer > maxVersion || requestedVer < minVersion {
-			resp.body = apiVersionsResponse{
-				errorCode: APIVersionsErrUnsupportedVersion,
-			}
-			return
-		}
-
 		resp.body = apiVersionsResponse{
 			apiKeys: apiKeys,
 		}
@@ -308,19 +299,7 @@ func (a apiVersionsResponse) WriteTo(w io.Writer) (int64, error) {
 }
 
 func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req *request) {
-	minVersion := app.supportedAPIs[APIKeyDescribeTopicPartitions].minVersion
-	maxVersion := app.supportedAPIs[APIKeyDescribeTopicPartitions].maxVersion
 	return func(resp *response, req *request) {
-		requestedVer := req.header.requestAPIVersion
-
-		if requestedVer > maxVersion || requestedVer < minVersion {
-			resp.body = apiVersionsResponse{
-				errorCode: APIVersionsErrUnsupportedVersion,
-			}
-			return
-		}
-
-		// Read request from body
 		br := bufio.NewReader(req.body)
 		dtpReq := describeTopicPartitionsRequest{}
 		_, err := dtpReq.ReadFrom(br)
@@ -383,6 +362,7 @@ func (app *app) handleDescribeTopicPartitionsRequest() func(resp *response, req 
 	}
 }
 
+// https://kafka.apache.org/protocol.html#protocol_error_codes
 type errorCode int16
 
 const (
@@ -730,26 +710,32 @@ func (f fetchResponse) WriteTo(w io.Writer) (int64, error) {
 	buf = binary.BigEndian.AppendUint32(buf, uint32(f.ThrottleTimeMS))
 	buf = binary.BigEndian.AppendUint16(buf, uint16(f.ErrorCode))
 	buf = binary.BigEndian.AppendUint32(buf, uint32(f.SessionID))
-	buf = append(buf, 0x00) // Topic responses
-	buf = append(buf, 0x00) // tag buffer
 	n, err := w.Write(buf)
-	return int64(n), err
+	if err != nil {
+		return int64(n), fmt.Errorf("write fetch resp: %w", err)
+	}
+	nW, err := f.responses.WriteTo(w)
+	return int64(n) + nW, err
 }
 
-func (app *app) handleFetchRequest() func(resp *response, req *request) {
-	minVersion := app.supportedAPIs[APIKeyFetch].minVersion
-	maxVersion := app.supportedAPIs[APIKeyFetch].maxVersion
-	return func(resp *response, req *request) {
-		requestedVer := req.header.requestAPIVersion
-
-		if requestedVer > maxVersion || requestedVer < minVersion {
-			resp.body = apiVersionsResponse{
+func (app *app) checkAPIVersion(next handlerFunc) handlerFunc {
+	return func(w *response, r *request) {
+		key := r.header.requestAPIKey
+		reqVersion := r.header.requestAPIVersion
+		minVersion := app.supportedAPIs[key].minVersion
+		maxVersion := app.supportedAPIs[key].maxVersion
+		if reqVersion > maxVersion || reqVersion < minVersion {
+			w.body = apiVersionsResponse{
 				errorCode: APIVersionsErrUnsupportedVersion,
 			}
 			return
 		}
 
-		// Read request from body
+		next(w, r)
+	}
+}
+func (app *app) handleFetchRequest() func(resp *response, req *request) {
+	return func(resp *response, req *request) {
 		br := bufio.NewReader(req.body)
 		var fetchReq fetchRequest
 		_, err := fetchReq.ReadFrom(br)

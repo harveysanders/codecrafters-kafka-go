@@ -427,3 +427,85 @@ func TestDescribeTopicPartitions(t *testing.T) {
 	})
 
 }
+
+func TestFetch(t *testing.T) {
+	metadataSrv := &metadata.Service{}
+
+	app := &app{
+		supportedAPIs: supportedAPIs{
+			APIKeyFetch: {
+				minVersion: 16,
+				maxVersion: 16,
+			},
+		},
+		metadataSrv:      metadataSrv,
+		metadataFilepath: "./test_data/__cluster_metadata.log",
+	}
+	srv := server{app}
+
+	go func(t *testing.T) {
+		err := srv.ListenAndServe()
+		require.NoError(t, err)
+	}(t)
+
+	t.Run("'Fetch' request - unknown topic", func(t *testing.T) {
+		// [tester::#HN6] Idx  | Hex                                             | ASCII
+		// [tester::#HN6] -----+-------------------------------------------------+-----------------
+		// [tester::#HN6] 0000 | 00 00 00 60 00 01 00 10 31 8b 04 b8 00 09 6b 61 | ...`....1.....ka
+		// [tester::#HN6] 0010 | 66 6b 61 2d 63 6c 69 00 00 00 01 f4 00 00 00 01 | fka-cli.........
+		// [tester::#HN6] 0020 | 03 20 00 00 00 00 00 00 00 00 00 00 00 02 00 00 | . ..............
+		// [tester::#HN6] 0030 | 00 00 00 00 00 00 00 00 00 00 00 00 10 63 02 00 | .............c..
+		// [tester::#HN6] 0040 | 00 00 00 ff ff ff ff 00 00 00 00 00 00 00 00 ff | ................
+		// [tester::#HN6] 0050 | ff ff ff ff ff ff ff ff ff ff ff 00 10 00 00 00 | ................
+		// [tester::#HN6] 0060 | 00 01 01 00
+
+		request := []byte{
+			0x00, 0x00, 0x00, 0x60, // message_size: 96
+			0x00, 0x01, // request_api_key: 1
+			0x00, 0x10, // request_api_version: v16
+			0x31, 0x8b, 0x04, 0xb8, // correlation_id: 79951128
+			// client_software_name
+			0x00, 0x09, // length  9
+			0x6b, 0x61, 0x66, 0x6b, 0x61, 0x2d, 0x63, 0x6c, 0x69, // kafka-cli
+			0x00, // tag buffer
+			// Body
+			0x00, 0x00, 0x01, 0xf4, 0x00, 0x00, 0x00, 0x01, // byte 31
+			0x03, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x63, 0x02, 0x00,
+			0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
+			0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x10, 0x00, 0x00, 0x00,
+			0x00, 0x01, 0x01, 0x00,
+		}
+
+		// wait for server to start
+		time.Sleep(20 * time.Millisecond)
+
+		client, err := net.Dial("tcp", "127.0.0.1:9092")
+		require.NoError(t, err)
+
+		defer func() {
+			_ = client.Close()
+		}()
+
+		nWritten, err := client.Write(request)
+		require.NoError(t, err)
+		require.Equal(t, len(request), nWritten)
+
+		var msgSize int32
+		err = binary.Read(client, binary.BigEndian, &msgSize)
+		require.NoError(t, err)
+
+		respBuf := make([]byte, msgSize)
+		_, err = io.ReadFull(client, respBuf)
+		require.NoError(t, err)
+
+		// Correlation ID (79951128)
+		require.Equal(t, []byte{0x31, 0x8b, 0x04, 0xb8}, respBuf[0:4])
+		// Tag buffer
+		require.Equal(t, []byte{0x00}, respBuf[4:5])
+		// throttle_time_ms: 0
+		require.Equal(t, []byte{0x00, 0x00, 0x00, 0x00}, respBuf[5:9])
+		// responses nullable compact array length +1:  1 item (val: 2)
+		require.Equal(t, []byte{0x02}, respBuf[9:10])
+	})
+}
